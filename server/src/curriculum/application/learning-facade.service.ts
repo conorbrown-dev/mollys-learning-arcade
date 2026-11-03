@@ -24,9 +24,9 @@ import {
 import { diagnosticQuestionFingerprint } from "./diagnostic-question-fingerprint";
 import { ProgressService } from "./progress-service";
 import { generateQuestion } from "./question-generator";
-import { KindergartenLiteracyEngine, activityByCheckpoint, activityView, evaluateKindergartenActivity, type KindergartenActivityCheckpoint } from "./kindergarten-literacy-engine";
-import { validateKindergartenElaCatalog } from "../infrastructure/kindergarten-ela.validator";
-import { KINDERGARTEN_ACTIVITY_EXCLUSION_WINDOW, KINDERGARTEN_SESSION_ACTIVITY_LIMIT, catalogSkill } from "../infrastructure/kindergarten-ela-catalog";
+import { LessonActivityEngine, activityByCheckpoint, activityView, evaluateLessonActivity, type LessonActivityCheckpoint } from "./lesson-activity-engine";
+import { LESSON_CATALOGS, KINDERGARTEN_ELA_CATALOG_ID, lessonCatalogById, lessonCatalogFor, lessonCatalogSkill } from "../infrastructure/lesson-catalogs";
+import type { LessonCatalog } from "../domain/lesson-catalog";
 import type { MisconceptionTag, SupportLevel } from "../domain/learning-activity";
 import type { EvidenceMode, SkillProgressState } from "../domain/ela-skill";
 
@@ -36,14 +36,16 @@ type StoredSession = {
   id: string; learnerId: string; purpose: SessionPurpose; grade: string; diagnosticGrouping: string; seed: number; position: number; length: number;
   templates: QuestionTemplate[]; instance: QuestionInstance; submittedInstanceIds: Set<string>; diagnosticQuestionFingerprints: Set<string>; proctoredCorrect: number;
   assessmentResult?: DiagnosticPlacement; retryTemplateId?: string; diagnostic?: DiagnosticState; createdAt: Date; status: "active" | "completed";
-  kindergarten?: KindergartenActivityCheckpoint;
+  lesson?: LessonActivityCheckpoint;
 };
 type PersistedSessionState = {
   grade: string; diagnosticGrouping: string; templateIds: string[]; instance: QuestionInstance; submittedInstanceIds: string[]; diagnosticQuestionFingerprints?: string[]; proctoredCorrect: number;
   assessmentResult?: Omit<DiagnosticPlacement, "completedAt"> & { completedAt: string }; retryTemplateId?: string; diagnostic?: DiagnosticState;
-  kindergarten?: KindergartenActivityCheckpoint;
+  lesson?: LessonActivityCheckpoint;
+  /** Sessions saved before lessons covered more than Kindergarten. */
+  kindergarten?: LessonActivityCheckpoint;
 };
-type KindergartenSubmissionResponse = {
+type LessonSubmissionResponse = {
   correct: boolean;
   explanation: string;
   masteryState: SkillProgressState;
@@ -64,26 +66,50 @@ const seedAt = (seed: number, position: number) => Math.abs(Math.imul(seed ^ (po
 const subjectName = (subject: LearningSubject | undefined) => subject === "ELA" ? "Reading & Language" : subject === "MATH" ? "Math" : subject?.split("_").map((word) => `${word[0]}${word.slice(1).toLowerCase()}`).join(" ") ?? "Learning";
 const catalogSubject = (subject: LearningSubject | undefined) => subject === "SOCIAL_STUDIES" ? "socialStudies" : subject === "PHYSICAL_EDUCATION" ? "physicalEducation" : subject === "FINE_ARTS" ? "fineArts" : subject === "COMPUTER_SCIENCE" ? "computerScience" : subject === "INFORMATION_LITERACY" ? "informationLiteracy" : subject?.toLowerCase();
 const isAdaptiveAssessment = (purpose: SessionPurpose) => purpose === "diagnostic" || purpose === "placement";
-const catalogStandardsForSkill = (skillId: string) => catalogSkill(skillId).standardMappings.map((mapping) => mapping.standardId);
+const catalogStandardsForSkill = (skillId: string) => lessonCatalogSkill(skillId).standardMappings.map((mapping) => mapping.standardId);
 
 @Injectable()
 export class LearningFacadeService {
   private readonly sessions = new Map<string, StoredSession>();
   private readonly progress: ProgressService;
-  private readonly kindergarten: KindergartenLiteracyEngine;
-  private readonly kindergartenSubmissions = new Map<string, Promise<KindergartenSubmissionResponse>>();
+  private readonly lessonEngines: Map<string, LessonActivityEngine>;
+  private readonly lessonSubmissions = new Map<string, Promise<LessonSubmissionResponse>>();
 
   constructor(
     @Inject(PrismaProgressRepository) private readonly repository: ProgressRepository,
     @Inject(CURRICULUM_PROCTOR_CODE) private readonly proctorCode: string | undefined = process.env.CURRICULUM_PROCTOR_CODE,
     @Inject(KINDERGARTEN_ELA_ENABLED) private readonly kindergartenElaEnabled = false,
     @Inject(KINDERGARTEN_ELA_AUDIO_READY) private readonly kindergartenElaAudioReady = false,
-  ) { this.progress = new ProgressService(repository, { now: () => new Date() }); this.kindergarten = new KindergartenLiteracyEngine(repository); }
+  ) {
+    this.progress = new ProgressService(repository, { now: () => new Date() });
+    this.lessonEngines = new Map(LESSON_CATALOGS.map((catalog) => [catalog.id, new LessonActivityEngine(catalog, repository)]));
+  }
+
+  /**
+   * The in-app lesson catalog to run for a practice session, if any.
+   *
+   * The Kindergarten slice stays behind its flag and its phoneme-audio gate.
+   * Grade 1 narrates everything through the TTS service, so it carries no
+   * recorded-audio dependency and is served by default.
+   */
+  private practiceLessonCatalog(grade: string, subject: LearningSubject | undefined): LessonCatalog | undefined {
+    const catalog = lessonCatalogFor(grade, subject);
+    if (!catalog) return undefined;
+    if (catalog.id !== KINDERGARTEN_ELA_CATALOG_ID) return catalog;
+    return this.kindergartenElaEnabled ? catalog : undefined;
+  }
+
+  private engineFor(catalogId: string | undefined): LessonActivityEngine {
+    const engine = this.lessonEngines.get(lessonCatalogById(catalogId).id);
+    if (!engine) throw new Error("This lesson catalog is not available.");
+    return engine;
+  }
 
   async start(learnerId: string, purpose: SessionPurpose, seed = Math.floor(Math.random() * 2_147_483_647), submittedProctorCode?: string, grade = "K", subject?: LearningSubject) {
     if ((purpose === "proctored" || purpose === "adultScored" || purpose === "placement") && (!this.proctorCode || submittedProctorCode !== this.proctorCode)) throw new ForbiddenException("A parent or teacher verification code is required to start a proctored assessment.");
     if (isAdaptiveAssessment(purpose) && subject !== "ELA" && subject !== "MATH") throw new ForbiddenException("Choose Reading & Language or Math before starting a diagnostic or placement check.");
-    if (this.kindergartenElaEnabled && purpose === "practice" && grade === "K" && subject === "ELA") return this.startKindergartenEla(learnerId, seed);
+    const lessonCatalog = purpose === "practice" ? this.practiceLessonCatalog(grade, subject) : undefined;
+    if (lessonCatalog) return this.startLessonSession(learnerId, seed, lessonCatalog);
     await validateK2ContentCatalog();
     const allTemplates = (await loadK2ContentCatalog()).templates.map(catalogTemplateToQuestionTemplate);
     const subjectFilter = catalogSubject(subject);
@@ -113,12 +139,13 @@ export class LearningFacadeService {
     return this.view(session);
   }
 
-  private async startKindergartenEla(learnerId: string, seed: number) {
-    if (!this.kindergartenElaAudioReady) throw new ForbiddenException("The Kindergarten reading slice is awaiting qualified phoneme-audio review.");
-    await validateKindergartenElaCatalog();
-    const selection = await this.kindergarten.select(learnerId, [], seedAt(seed, 0));
+  private async startLessonSession(learnerId: string, seed: number, catalog: LessonCatalog) {
+    if (catalog.id === KINDERGARTEN_ELA_CATALOG_ID && !this.kindergartenElaAudioReady) throw new ForbiddenException("The Kindergarten reading slice is awaiting qualified phoneme-audio review.");
+    await catalog.validate();
+    const selection = await this.engineFor(catalog.id).select(learnerId, [], seedAt(seed, 0));
     const instanceId = randomUUID();
-    const kindergarten: KindergartenActivityCheckpoint = {
+    const lesson: LessonActivityCheckpoint = {
+      catalogId: catalog.id,
       activityId: selection.activity.id,
       activityVersion: selection.activity.version,
       instanceId,
@@ -129,16 +156,16 @@ export class LearningFacadeService {
     };
     const now = new Date();
     const session: StoredSession = {
-      id: randomUUID(), learnerId, purpose: "practice", grade: "K", diagnosticGrouping: "Reading & Language", seed, position: 0, length: KINDERGARTEN_SESSION_ACTIVITY_LIMIT,
-      templates: [], instance: this.questionForKindergarten(kindergarten), submittedInstanceIds: new Set<string>(), diagnosticQuestionFingerprints: new Set<string>(),
-      proctoredCorrect: 0, createdAt: now, status: "active", kindergarten,
+      id: randomUUID(), learnerId, purpose: "practice", grade: catalog.grade, diagnosticGrouping: subjectName(catalog.subject), seed, position: 0, length: catalog.sessionActivityLimit,
+      templates: [], instance: this.questionForLesson(lesson), submittedInstanceIds: new Set<string>(), diagnosticQuestionFingerprints: new Set<string>(),
+      proctoredCorrect: 0, createdAt: now, status: "active", lesson,
     };
     this.sessions.set(session.id, session);
     await this.checkpoint(session);
     return this.view(session);
   }
 
-  private questionForKindergarten(checkpoint: KindergartenActivityCheckpoint): QuestionInstance {
+  private questionForLesson(checkpoint: LessonActivityCheckpoint): QuestionInstance {
     const activity = activityByCheckpoint(checkpoint);
     const skill = activityView(checkpoint).primarySkill;
     const standardIds = catalogStandardsForSkill(activity.primarySkillId);
@@ -162,13 +189,13 @@ export class LearningFacadeService {
       answerNormalization: null,
       explanation: activity.explanation,
       accessibility: { spokenPrompt: activity.narration, textAlternative: `${skill.name}. ${activity.prompt}`, reducedMotionSafe: true },
-      provenance: { origin: "original", curriculum: "kindergarten-short-a-vertical-slice", activityId: activity.id, skillId: activity.primarySkillId },
+      provenance: { origin: "original", curriculum: lessonCatalogById(checkpoint.catalogId).id, activityId: activity.id, skillId: activity.primarySkillId },
     };
   }
 
   async submit(sessionId: string, answer: unknown, usedHint = false) {
     const session = await this.requireSession(sessionId);
-    if (session.kindergarten) return this.submitKindergarten(session, answer, usedHint);
+    if (session.lesson) return this.submitLesson(session, answer, usedHint);
     const evaluation = evaluateAnswer(session.instance, answer);
     if (session.submittedInstanceIds.has(session.instance.id)) return { correct: evaluation.correct, explanation: session.instance.explanation, masteryState: "unchanged", complete: session.status === "completed", placement: this.placementView(session.assessmentResult) };
     const attempt: AttemptEvent = {
@@ -203,28 +230,29 @@ export class LearningFacadeService {
     return { correct: evaluation.correct, explanation: session.instance.explanation, masteryState: finalMastery.state, complete, retry, placement: this.placementView(session.assessmentResult) };
   }
 
-  private async submitKindergarten(session: StoredSession, answer: unknown, usedHint: boolean): Promise<KindergartenSubmissionResponse> {
-    const instanceId = session.kindergarten!.instanceId;
+  private async submitLesson(session: StoredSession, answer: unknown, usedHint: boolean): Promise<LessonSubmissionResponse> {
+    const instanceId = session.lesson!.instanceId;
     const submissionKey = `${session.id}:${instanceId}`;
-    const pending = this.kindergartenSubmissions.get(submissionKey);
+    const pending = this.lessonSubmissions.get(submissionKey);
     if (pending) return pending;
-    const submission = this.recordKindergartenSubmission(session, answer, usedHint);
-    this.kindergartenSubmissions.set(submissionKey, submission);
+    const submission = this.recordLessonSubmission(session, answer, usedHint);
+    this.lessonSubmissions.set(submissionKey, submission);
     try {
       return await submission;
     } catch (error) {
-      if (session.kindergarten?.instanceId === instanceId && !session.kindergarten.recordedResult) {
-        session.kindergarten.isRecorded = false;
-        session.submittedInstanceIds.delete(session.kindergarten.instanceId);
+      if (session.lesson?.instanceId === instanceId && !session.lesson.recordedResult) {
+        session.lesson.isRecorded = false;
+        session.submittedInstanceIds.delete(session.lesson.instanceId);
       }
       throw error;
     } finally {
-      this.kindergartenSubmissions.delete(submissionKey);
+      this.lessonSubmissions.delete(submissionKey);
     }
   }
 
-  private async recordKindergartenSubmission(session: StoredSession, answer: unknown, usedHint: boolean): Promise<KindergartenSubmissionResponse> {
-    const checkpoint = session.kindergarten!;
+  private async recordLessonSubmission(session: StoredSession, answer: unknown, usedHint: boolean): Promise<LessonSubmissionResponse> {
+    const checkpoint = session.lesson!;
+    const catalog = lessonCatalogById(checkpoint.catalogId);
     const activity = activityByCheckpoint(checkpoint);
     if (activity.purpose === "INSTRUCTION" || activity.purpose === "MODELED_EXAMPLE") throw new Error("Complete this teaching step before continuing.");
     if (checkpoint.isRecorded || session.submittedInstanceIds.has(checkpoint.instanceId)) {
@@ -233,20 +261,20 @@ export class LearningFacadeService {
       return { correct: recorded.correct, explanation: recorded.explanation, masteryState: recorded.masteryState, complete: recorded.complete, retry: recorded.retry, celebrate: recorded.celebrate, evidenceMode: recorded.evidenceMode, misconception: recorded.misconception, tutorState: recorded.tutorState, tutorMessage: recorded.tutorMessage, placement: undefined };
     }
     if (usedHint && checkpoint.supportLevels.length === 0) checkpoint.supportLevels.push("L1_FOCUS");
-    const proposedEvaluation = evaluateKindergartenActivity(activity, answer, checkpoint.supportLevels);
+    const proposedEvaluation = evaluateLessonActivity(activity, answer, checkpoint.supportLevels);
     checkpoint.isRecorded = true;
     session.submittedInstanceIds.add(checkpoint.instanceId);
-    const record = await this.kindergarten.record(session.learnerId, session.id, checkpoint, proposedEvaluation.correct, answer, proposedEvaluation.evidenceMode);
+    const record = await this.engineFor(checkpoint.catalogId).record(session.learnerId, session.id, checkpoint, proposedEvaluation.correct, answer, proposedEvaluation.evidenceMode);
     const acceptedSupports = record.evidence.supportEvents;
     checkpoint.supportLevels = [...acceptedSupports];
-    const evaluation = record.isNew ? proposedEvaluation : evaluateKindergartenActivity(activity, record.evidence.response, acceptedSupports);
+    const evaluation = record.isNew ? proposedEvaluation : evaluateLessonActivity(activity, record.evidence.response, acceptedSupports);
     const attemptPurpose: AttemptEvent["purpose"] = activity.purpose === "REVIEW" ? "review" : activity.purpose === "GUIDED_PRACTICE" ? "learning" : "practice";
     const standardIds = catalogStandardsForSkill(activity.primarySkillId);
     const attempt: AttemptEvent = {
       id: randomUUID(), learnerId: session.learnerId, sessionId: session.id, questionInstanceId: checkpoint.instanceId, templateId: activity.id,
       templateVersion: activity.version, primaryStandardId: standardIds[0], supportingStandardIds: standardIds.slice(1), submittedAnswer: record.evidence.response,
       correct: evaluation.correct, usedHint: acceptedSupports.some((support) => support !== "L0_REPLAY"), independent: (activity.purpose === "INDEPENDENT_PRACTICE" || activity.purpose === "MASTERY_CHECK" || activity.purpose === "REVIEW") && acceptedSupports.every((support) => support === "L0_REPLAY"),
-      purpose: attemptPurpose, deliveryContext: `kindergartenVerticalSlice:${evaluation.evidenceMode}`, responseDurationMs: null, attemptedAt: new Date(), responseType: session.instance.responseType,
+      purpose: attemptPurpose, deliveryContext: `${catalog.deliveryContext}:${evaluation.evidenceMode}`, responseDurationMs: null, attemptedAt: new Date(), responseType: session.instance.responseType,
       activityId: activity.id, activityVersion: activity.version, primarySkillId: activity.primarySkillId, supportingSkillIds: [...activity.supportingSkillIds], evidenceMode: evaluation.evidenceMode, supportEvents: [...acceptedSupports],
     };
     await this.repository.addAttempt(attempt);
@@ -259,13 +287,13 @@ export class LearningFacadeService {
 
   async completeActivityForLearner(sessionId: string, learnerId: string, instanceId: string) {
     const session = await this.requireOwnedSession(sessionId, learnerId);
-    if (!session.kindergarten || session.kindergarten.instanceId !== instanceId) throw new Error("This lesson step is no longer current.");
-    const activity = activityByCheckpoint(session.kindergarten);
+    if (!session.lesson || session.lesson.instanceId !== instanceId) throw new Error("This lesson step is no longer current.");
+    const activity = activityByCheckpoint(session.lesson);
     if (activity.purpose !== "INSTRUCTION" && activity.purpose !== "MODELED_EXAMPLE") throw new Error("Submit a response for this activity.");
-    if (!session.kindergarten.isRecorded) {
-      session.kindergarten.isRecorded = true;
+    if (!session.lesson.isRecorded) {
+      session.lesson.isRecorded = true;
       session.submittedInstanceIds.add(instanceId);
-      await this.kindergarten.record(session.learnerId, session.id, session.kindergarten, true, { completed: true });
+      await this.engineFor(session.lesson.catalogId).record(session.learnerId, session.id, session.lesson, true, { completed: true });
     }
     const complete = session.position + 1 >= session.length;
     if (complete) session.status = "completed";
@@ -275,11 +303,11 @@ export class LearningFacadeService {
 
   async hintForLearner(sessionId: string, learnerId: string, instanceId: string, requested?: SupportLevel) {
     const session = await this.requireOwnedSession(sessionId, learnerId);
-    if (!session.kindergarten || session.kindergarten.instanceId !== instanceId || session.kindergarten.isRecorded) throw new Error("This lesson step is no longer available for a hint.");
-    const result = this.kindergarten.addHint(session.kindergarten, requested);
-    session.kindergarten = result.checkpoint;
+    if (!session.lesson || session.lesson.instanceId !== instanceId || session.lesson.isRecorded) throw new Error("This lesson step is no longer available for a hint.");
+    const result = this.engineFor(session.lesson.catalogId).addHint(session.lesson, requested);
+    session.lesson = result.checkpoint;
     await this.checkpoint(session);
-    const view = activityView(session.kindergarten);
+    const view = activityView(session.lesson);
     return { message: result.message, ...(result.narration ? { narration: result.narration } : {}), highestSupport: view.highestSupport, evidenceMode: view.evidenceMode };
   }
 
@@ -313,7 +341,7 @@ export class LearningFacadeService {
   async next(sessionId: string) {
     const session = await this.requireSession(sessionId);
     if (session.status === "completed") return null;
-    if (session.kindergarten) return this.nextKindergarten(session);
+    if (session.lesson) return this.nextLesson(session);
     if (session.diagnostic) {
       while (!session.diagnostic.isComplete) {
         const skill = selectNextDiagnosticSkill(session.diagnostic);
@@ -351,27 +379,29 @@ export class LearningFacadeService {
     return this.view(session);
   }
 
-  private async nextKindergarten(session: StoredSession) {
-    if (!session.kindergarten?.isRecorded) throw new Error("Finish the current lesson step before continuing.");
+  private async nextLesson(session: StoredSession) {
+    if (!session.lesson?.isRecorded) throw new Error("Finish the current lesson step before continuing.");
+    const catalog = lessonCatalogById(session.lesson.catalogId);
     if (session.position + 1 >= session.length) {
       session.status = "completed";
       await this.checkpoint(session);
       return null;
     }
     session.position += 1;
-    const recentActivityIds = session.kindergarten.recentActivityIds;
-    const selection = await this.kindergarten.select(session.learnerId, recentActivityIds, seedAt(session.seed, session.position));
+    const recentActivityIds = session.lesson.recentActivityIds;
+    const selection = await this.engineFor(session.lesson.catalogId).select(session.learnerId, recentActivityIds, seedAt(session.seed, session.position));
     const instanceId = randomUUID();
-    session.kindergarten = {
+    session.lesson = {
+      catalogId: catalog.id,
       activityId: selection.activity.id,
       activityVersion: selection.activity.version,
       instanceId,
       selectionReason: selection.selectionReason,
       supportLevels: [],
       isRecorded: false,
-      recentActivityIds: [...recentActivityIds, selection.activity.id].slice(-KINDERGARTEN_ACTIVITY_EXCLUSION_WINDOW),
+      recentActivityIds: [...recentActivityIds, selection.activity.id].slice(-catalog.activityExclusionWindow),
     };
-    session.instance = this.questionForKindergarten(session.kindergarten);
+    session.instance = this.questionForLesson(session.lesson);
     await this.checkpoint(session);
     return this.view(session);
   }
@@ -379,7 +409,7 @@ export class LearningFacadeService {
   async progressFor(learnerId: string) {
     const [attempts, mastery, placements, skillProgress] = await Promise.all([this.repository.listAttempts(learnerId), this.repository.listMastery(learnerId), this.repository.listDiagnosticPlacements(learnerId), this.repository.listSkillProgress(learnerId)]);
     const latestAssessment = attempts.filter((attempt) => attempt.purpose === "diagnostic" || attempt.purpose === "placement").sort((left, right) => right.attemptedAt.getTime() - left.attemptedAt.getTime())[0];
-    return { attempts, mastery, skillProgress: skillProgress.map((record) => ({ ...record, skillName: catalogSkill(record.skillId).name, domain: catalogSkill(record.skillId).domain })), latestDiagnosticPlacement: placements[0] ? this.placementView(placements[0]) : null, latestAssessmentSessionId: latestAssessment?.sessionId ?? null };
+    return { attempts, mastery, skillProgress: skillProgress.map((record) => ({ ...record, skillName: lessonCatalogSkill(record.skillId).name, domain: lessonCatalogSkill(record.skillId).domain })), latestDiagnosticPlacement: placements[0] ? this.placementView(placements[0]) : null, latestAssessmentSessionId: latestAssessment?.sessionId ?? null };
   }
 
   async lessonPlans() { return loadProductionLessonPlans(); }
@@ -434,15 +464,16 @@ export class LearningFacadeService {
     const state = record.state as unknown as PersistedSessionState;
     const allTemplates = (await loadK2ContentCatalog()).templates.map(catalogTemplateToQuestionTemplate);
     const templates = state.templateIds.map((templateId) => allTemplates.find((template) => template.id === templateId)).filter((template): template is QuestionTemplate => Boolean(template));
-    if (!state.kindergarten && templates.length !== state.templateIds.length) throw new Error("Some content used by this learning session is no longer available.");
-    if (state.kindergarten) activityByCheckpoint(state.kindergarten);
+    const lesson = state.lesson ?? state.kindergarten;
+    if (!lesson && templates.length !== state.templateIds.length) throw new Error("Some content used by this learning session is no longer available.");
+    if (lesson) activityByCheckpoint(lesson);
     const session: StoredSession = {
       id: record.id, learnerId: record.learnerId, purpose: record.purpose as SessionPurpose, grade: state.grade,
       diagnosticGrouping: state.diagnosticGrouping, seed: record.seed, position: record.position, length: record.length,
       templates, instance: state.instance, submittedInstanceIds: new Set(state.submittedInstanceIds),
       diagnosticQuestionFingerprints: new Set(state.diagnosticQuestionFingerprints ?? (state.diagnostic ? [diagnosticQuestionFingerprint(state.instance)] : [])), proctoredCorrect: state.proctoredCorrect,
       assessmentResult: state.assessmentResult ? { ...state.assessmentResult, completedAt: new Date(state.assessmentResult.completedAt) } : undefined,
-      retryTemplateId: state.retryTemplateId, diagnostic: state.diagnostic, kindergarten: state.kindergarten, createdAt: record.createdAt, status: record.status
+      retryTemplateId: state.retryTemplateId, diagnostic: state.diagnostic, lesson, createdAt: record.createdAt, status: record.status
     };
     this.sessions.set(id, session);
     return session;
@@ -459,7 +490,7 @@ export class LearningFacadeService {
       grade: session.grade, diagnosticGrouping: session.diagnosticGrouping, templateIds: session.templates.map((template) => template.id), instance: session.instance,
       submittedInstanceIds: [...session.submittedInstanceIds], diagnosticQuestionFingerprints: [...session.diagnosticQuestionFingerprints], proctoredCorrect: session.proctoredCorrect,
       assessmentResult: session.assessmentResult ? { ...session.assessmentResult, completedAt: session.assessmentResult.completedAt.toISOString() } : undefined,
-      retryTemplateId: session.retryTemplateId, diagnostic: session.diagnostic, kindergarten: session.kindergarten
+      retryTemplateId: session.retryTemplateId, diagnostic: session.diagnostic, lesson: session.lesson
     };
     const now = new Date();
     const record: LearningSessionRecord = {
@@ -481,7 +512,7 @@ export class LearningFacadeService {
     return {
       sessionId: session.id, position: session.position, length: session.length,
       ...(session.diagnostic ? { assessmentStage: { grade: session.grade, number: session.diagnostic.gradeIndex + 1, total: session.diagnostic.blueprint.grades.length } } : {}),
-      ...(session.kindergarten ? { activity: activityView(session.kindergarten) } : {}),
+      ...(session.lesson ? { activity: activityView(session.lesson) } : {}),
       question: instance
     };
   }

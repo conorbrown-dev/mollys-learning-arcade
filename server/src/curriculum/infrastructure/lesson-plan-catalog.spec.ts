@@ -39,12 +39,8 @@ describe("lesson-plan catalog", () => {
     const kindergartenOperations = validatedPlans.find((plan) => plan.id === "k.math.operations-and-number-bonds");
     expect(kindergartenOperations?.days.flatMap((day) => day.independentPractice.templateIds)).toEqual(expect.arrayContaining(["k.oa.a.4.make-ten", "k.oa.a.5.fluency-within-five"]));
 
-    const gradeOneOperations = plans.find((plan) => plan.id === "1.math.addition-and-subtraction-strategies");
-    expect(gradeOneOperations?.days.flatMap((day) => day.independentPractice.templateIds)).toEqual(expect.arrayContaining(["1.oa.a.1.word-problem", "1.oa.d.8.unknown-equation"]));
-
-    const gradeOneReading = plans.find((plan) => plan.id === "1.ela.sound-spelling-and-word-reading");
-    expect(gradeOneReading?.days.flatMap((day) => day.independentPractice.templateIds)).toEqual(expect.arrayContaining(["1.rf.3.a.digraphs", "1.rf.3.g.irregular-words"]));
-    expect(JSON.stringify(gradeOneReading)).toContain("controlled text");
+    // Grade 1 is taught in the app by the lesson catalog, so it has no adult-led plan here.
+    expect(plans.filter((plan) => plan.grade === "1")).toHaveLength(0);
 
     const kindergartenSoundWork = validatedPlans.find((plan) => plan.id === "k.ela.short-vowels-and-cvc-sounds");
     const kindergartenSoundTemplates = kindergartenSoundWork?.days.flatMap((day) => day.independentPractice.templateIds);
@@ -53,17 +49,11 @@ describe("lesson-plan catalog", () => {
 
     const kindergartenShapes = validatedPlans.find((plan) => plan.id === "k.math.shapes-measurement-and-data");
     expect(kindergartenShapes?.days.flatMap((day) => day.independentPractice.templateIds)).toEqual(expect.arrayContaining(["k.g.b.6.compose-shapes", "k.md.b.3.sort-and-count"]));
-
-    const gradeOnePlaceValue = plans.find((plan) => plan.id === "1.math.place-value-and-two-digit-strategies");
-    expect(gradeOnePlaceValue?.days.flatMap((day) => day.independentPractice.templateIds)).toEqual(expect.arrayContaining(["1.nbt.a.1.count-to-120", "1.nbt.c.6.subtract-tens"]));
   });
 
   it("includes every approved sequence in the production bundle", async () => {
     const productionPlans = await loadProductionLessonPlans();
     expect(productionPlans.map((plan) => plan.id)).toEqual([
-      "1.ela.sound-spelling-and-word-reading",
-      "1.math.addition-and-subtraction-strategies",
-      "1.math.place-value-and-two-digit-strategies",
       "k.math.counting-and-quantities"
     ]);
     expect(productionPlans.every((plan) => plan.review.status === "reviewed" && plan.review.reviewer === "Conor Brown" && typeof plan.review.contentHash === "string")).toBe(true);

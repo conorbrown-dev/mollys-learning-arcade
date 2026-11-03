@@ -93,9 +93,12 @@ function ControlledTextReader({ presentation, selectedChoice, result, isBusy, is
   onSelect: (choiceId: string) => void;
   onReadHelp: () => void;
 }): JSX.Element {
+  // A single short sentence is shown large for early decoding; a longer Grade 1
+  // passage is shown at reading size so it stays legible on one screen.
+  const isPassage = presentation.text.trim().split(/\s+/).length > 6;
   return <section className="controlled-text-reader">
-    <p className="controlled-sentence">{presentation.text}</p>
-    {!result && <button className="secondary" type="button" disabled={isRequestingHint || isBusy} onClick={onReadHelp}>READ IT TO ME FOR HELP</button>}
+    <p className={`controlled-sentence${isPassage ? " is-passage" : ""}`}>{presentation.text}</p>
+    {!result && <button className="secondary" type="button" disabled={isRequestingHint || isBusy} onClick={onReadHelp}>Read it to me</button>}
     <ChoiceBoard choices={presentation.choices} selected={selectedChoice} disabled={Boolean(result) || isBusy} onSelect={onSelect} />
   </section>;
 }

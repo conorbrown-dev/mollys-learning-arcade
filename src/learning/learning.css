@@ -879,6 +879,22 @@
   border-radius: var(--l-radius);
   background: var(--l-sunken);
 }
+.controlled-text-reader {
+  display: grid;
+  gap: 16px;
+  justify-items: stretch;
+}
+.learning-shell .controlled-text-reader > button.secondary { justify-self: start; }
+/* A longer Grade 1 passage reads as text, not as a decoding target. */
+.controlled-sentence.is-passage {
+  max-width: 54ch;
+  margin-inline: auto;
+  font: 400 clamp(1.0625rem, 0.95rem + 0.5vw, 1.25rem) / 1.65 var(--l-sans);
+  letter-spacing: 0;
+  text-align: left;
+  text-wrap: pretty;
+}
+
 .lesson-model-text,
 .controlled-sentence {
   margin: 0;
@@ -917,12 +933,29 @@
 }
 .lesson-choice { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .learning-shell .lesson-choice > button:first-child { min-height: 76px; }
-.learning-shell .choice-speaker { min-width: 48px; padding-inline: 12px; }
+/* The replay button beside an answer is an aid, so it stays quieter than the answer itself. */
+.learning-shell .choice-speaker {
+  --btn-bg: transparent;
+  --btn-fg: var(--l-accent-strong);
+  --btn-border: var(--l-line-strong);
+  --btn-hover: var(--l-accent-soft);
+  --btn-hover-border: var(--l-accent-line);
+  min-width: 48px;
+  padding-inline: 12px;
+  font-size: 1.05rem;
+}
 .lesson-choice-visual { display: block; font-size: 1.75rem; }
 .lesson-choice-label { display: block; margin-top: 4px; }
-.lesson-card-workspace { display: grid; gap: 16px; }
+.lesson-card-workspace { display: grid; gap: 16px; justify-items: center; }
+.learning-shell .word-audio-button { justify-self: center; }
 .learning-shell .letter-card { min-width: 56px; min-height: 56px; font-size: 1.25rem; }
-.lesson-support-row { align-items: flex-start; flex-direction: column; }
+.lesson-support-row {
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+}
+.lesson-support-row .lesson-hint { flex: 1 1 260px; }
 .lesson-hint {
   padding: 12px 14px;
   border-radius: var(--l-radius-sm);

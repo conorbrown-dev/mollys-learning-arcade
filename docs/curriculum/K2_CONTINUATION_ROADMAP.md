@@ -40,12 +40,17 @@ Recent milestones:
 - The standalone Learning dashboard now shows the approved plan at the learner's selected grade and subject. The dedicated guided-lesson screen includes every day, materials, text recommendation, independent-practice mapping, reteach path, accommodations, replayable model-backed overview narration, and predictable return navigation. The authenticated endpoint exposes only reviewed lesson plans.
 - `k.ela.print-and-early-reading` is a machine-validated five-day Kindergarten ELA instructional draft. It teaches print concepts, letter-sound connections, and early word reading using existing reviewed templates, and remains outside the production bundle until named human review.
 - `k.math.operations-and-number-bonds` adds five validated days of concrete addition, subtraction, decomposition, make-ten work, and fluency within five.
-- `1.math.addition-and-subtraction-strategies` adds five validated Grade 1 days covering story problems, related facts, counting strategies, unknowns, and equation meaning.
-- `1.ela.sound-spelling-and-word-reading` adds five validated, adult-supported Grade 1 days covering oral phoneme work, digraphs, one-syllable decoding, short/long vowel contrasts, syllables, endings, irregular words, and controlled-text reading.
 - `k.ela.short-vowels-and-cvc-sounds` adds five validated, adult-supported days for short-vowel listening, phoneme isolation, oral blending and segmenting, sound substitution, and CVC spelling. The executable `K.RF.3.b` through `K.RF.3.d` checks were realigned to vowel spellings, high-frequency words, and similarly spelled words instead of the prior shifted mappings.
 - `k.math.shapes-measurement-and-data` adds five validated days for positions, flat and solid shapes, shape construction and composition, direct measurement comparison, classification, counting, and category comparison.
-- `1.math.place-value-and-two-digit-strategies` adds five validated days for counting to 120, tens and ones, teen and decade numbers, two-digit comparison, addition within 100, ten more or less, and subtracting tens.
-- The lesson-plan catalog now contains eight plans and 40 instructional days: one reviewed production plan and seven validated drafts. The generated HTML/JSON review packet contains all eight plans, while the production API continues to expose only the reviewed plan.
+- The three Grade 1 adult-led plans were retired on November 3, 2026. They depended on letter cards, counters, ten-frames, base-ten blocks, and 120 countable objects, which the web app cannot supply, and the in-app player could only narrate their directions aloud. Grade 1 reading and language is now taught by the in-app lesson catalog instead; Grade 1 math still falls back to the question bank until a math lesson catalog exists.
+- The lesson-plan catalog now contains five Kindergarten plans and 25 instructional days: one reviewed production plan and four validated drafts. The generated HTML/JSON review packet contains all five, while the production API continues to expose only the reviewed plan.
+
+## In-app lesson catalogs
+
+The lesson engine (`application/lesson-activity-engine.ts`) is catalog-driven: sequencing, selection, hinting, and mastery are shared, and a `LessonCatalog` supplies the content. Catalogs are registered in `infrastructure/lesson-catalogs.ts`.
+
+- `ela.k.short-a` — the Kindergarten short-a vertical slice. Still gated behind `KINDERGARTEN_ELA_VERTICAL_SLICE_ENABLED` and the phoneme-audio review.
+- `ela.grade-1` — 48 skills, one per Grade 1 ELA standard the proficiency test draws on, built from 576 activities. Every prompt is answerable on screen, narration comes from the model TTS service, and no activity references recorded phoneme audio, so it ships without an audio gate. Skills map the Common Core identifier as the primary standard, which is what the Grade 1 question bank and proficiency test are keyed to, so lesson evidence lands on the same standard the test measures.
 
 ## Remaining objectives
 

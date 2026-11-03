@@ -23,6 +23,7 @@ import {
 import { coreCourseRoadmap } from "./coreCourseRoadmaps";
 import { KindergartenLessonActivity } from "./KindergartenLessonActivity";
 import { GuidedLessonPlayer } from "./GuidedLessonPlayer";
+import "./learning.css";
 
 type ProgressAttempt = {
   sessionId: string;
@@ -406,7 +407,7 @@ function LessonPlanScreen({
   return (
     <section className="learning-question lesson-plan">
       <button className="secondary lesson-back" onClick={onBack}>
-        BACK TO LEARNING
+        Back to learning
       </button>
       <p className="eyebrow">
         GUIDED LESSON ·{" "}
@@ -498,11 +499,109 @@ function LessonPlanScreen({
         </ul>
       </details>
       <button className="secondary lesson-back" onClick={onBack}>
-        BACK TO LEARNING
+        Back to learning
       </button>
     </section>
   );
 }
+
+type SubjectDetails = {
+  label: string;
+  icon: string;
+  /** Label for the adult-guided activity that starts from the parent tools. */
+  adultActivity: string;
+  /** Short note shown above the start buttons. */
+  activityNote: string;
+};
+
+const SUBJECT_ORDER: readonly LearningSubject[] = [
+  "ELA",
+  "MATH",
+  "SCIENCE",
+  "SOCIAL_STUDIES",
+  "HEALTH",
+  "PHYSICAL_EDUCATION",
+  "FINE_ARTS",
+  "COMPUTER_SCIENCE",
+  "INFORMATION_LITERACY",
+];
+
+const SUBJECT_DETAILS: Record<LearningSubject, SubjectDetails> = {
+  ELA: {
+    label: "Reading & Language",
+    icon: "Aa",
+    adultActivity: "Adult-scored ELA",
+    activityNote:
+      "Practice follows a small set of next skills. A diagnostic finds the best place to focus next.",
+  },
+  MATH: {
+    label: "Math",
+    icon: "1+2",
+    adultActivity: "Hands-on math activity",
+    activityNote:
+      "Practice follows a small set of next number skills. Hands-on activities with an adult build mathematical reasoning with real objects and drawings.",
+  },
+  SCIENCE: {
+    label: "Science",
+    icon: "✦",
+    adultActivity: "Science investigation",
+    activityNote:
+      "Oklahoma science is learned through hands-on investigations with an adult.",
+  },
+  SOCIAL_STUDIES: {
+    label: "Social Studies",
+    icon: "⌂",
+    adultActivity: "Social studies inquiry",
+    activityNote:
+      "Oklahoma social studies is learned through conversations, maps, sources, and real-life inquiry with an adult.",
+  },
+  HEALTH: {
+    label: "Health",
+    icon: "♥",
+    adultActivity: "Health activity",
+    activityNote:
+      "Oklahoma health is learned through safe, age-appropriate conversations and everyday healthy routines with an adult.",
+  },
+  PHYSICAL_EDUCATION: {
+    label: "Physical Education",
+    icon: "↟",
+    adultActivity: "Movement activity",
+    activityNote:
+      "Physical education is guided movement. Choose a clear, safe space and complete each activity with an adult.",
+  },
+  FINE_ARTS: {
+    label: "Fine Arts",
+    icon: "✎",
+    adultActivity: "Fine arts activity",
+    activityNote:
+      "Fine arts uses making, performing, noticing, and reflecting across dance, drama, media arts, music, and visual art with an adult.",
+  },
+  COMPUTER_SCIENCE: {
+    label: "Computer Science",
+    icon: "⌘",
+    adultActivity: "Computer science activity",
+    activityNote:
+      "Computer science uses safe hands-on and unplugged investigations of data, algorithms, programming, networks, and computing systems with an adult.",
+  },
+  INFORMATION_LITERACY: {
+    label: "Information Literacy",
+    icon: "⌕",
+    adultActivity: "Information literacy inquiry",
+    activityNote:
+      "Information literacy uses books, people, libraries, and safe supervised digital tools to ask questions, research, organize ideas, and share learning.",
+  },
+};
+
+/** Subjects that are taught and scored with an adult rather than practiced on screen. */
+const ADULT_OBSERVED_ONLY_SUBJECTS: readonly LearningSubject[] = [
+  "SCIENCE",
+  "SOCIAL_STUDIES",
+  "HEALTH",
+  "PHYSICAL_EDUCATION",
+  "FINE_ARTS",
+  "COMPUTER_SCIENCE",
+  "INFORMATION_LITERACY",
+];
 
 function LearningDashboard({
   student,
@@ -537,380 +636,264 @@ function LearningDashboard({
   openLesson: (lessonPlanId: string) => void;
   error: string | null;
 }): JSX.Element {
-  const isAdultObservedOnly = [
-    "SCIENCE",
-    "SOCIAL_STUDIES",
-    "HEALTH",
-    "PHYSICAL_EDUCATION",
-    "FINE_ARTS",
-    "COMPUTER_SCIENCE",
-    "INFORMATION_LITERACY",
-  ].includes(selectedSubject);
-  const adultActivityLabel =
-    selectedSubject === "MATH"
-      ? "HANDS-ON MATH ACTIVITY"
-      : selectedSubject === "SCIENCE"
-        ? "SCIENCE INVESTIGATION"
-        : selectedSubject === "SOCIAL_STUDIES"
-          ? "SOCIAL STUDIES INQUIRY"
-          : selectedSubject === "HEALTH"
-            ? "HEALTH ACTIVITY"
-            : selectedSubject === "PHYSICAL_EDUCATION"
-              ? "MOVEMENT ACTIVITY"
-              : selectedSubject === "FINE_ARTS"
-                ? "FINE ARTS ACTIVITY"
-                : selectedSubject === "COMPUTER_SCIENCE"
-                  ? "COMPUTER SCIENCE ACTIVITY"
-                  : selectedSubject === "INFORMATION_LITERACY"
-                    ? "INFORMATION LITERACY INQUIRY"
-                    : "ADULT-SCORED ELA";
+  const subject = SUBJECT_DETAILS[selectedSubject];
+  const isAdultObservedOnly =
+    ADULT_OBSERVED_ONLY_SUBJECTS.includes(selectedSubject);
+  const selectedLevel =
+    student?.curriculumLevels?.[selectedSubject] ?? student?.grade;
   const roadmap = coreCourseRoadmap(
     selectedSubject,
-    learningGrade(
-      student?.curriculumLevels?.[selectedSubject] ?? student?.grade,
-    ),
+    learningGrade(selectedLevel),
   );
+  const savedActivityName =
+    resumableAssessment?.mode === "practice" ? "lesson" : "learning check";
+  const resumeName =
+    resumableAssessment?.mode === "practice"
+      ? "lesson"
+      : resumableAssessment?.mode === "placement"
+        ? "placement"
+        : "diagnostic";
+
   return (
-    <section className="learning-dashboard mx-auto max-w-4xl">
-      <div className="learning-hero mb-8">
-        <p className="learning-kicker mb-3 inline-flex rounded-full px-4 py-2 text-xs font-black tracking-[.18em]">
-          OKLAHOMA-ALIGNED LEARNING
-        </p>
-        <h1 className="max-w-3xl !text-[clamp(2.25rem,6vw,4.5rem)]">
-          Ready to learn something new?
-        </h1>
-        <p className="learning-intro mt-4 max-w-2xl text-lg">
+    <section className="learning-dashboard">
+      <div className="dash-intro">
+        <p className="eyebrow">Oklahoma-aligned learning</p>
+        <h1>Ready to learn something new?</h1>
+        <p className="dash-lede">
           Choose one subject, then begin a focused activity at your current
           level.
         </p>
       </div>
 
-      <section
-        aria-labelledby="subject-heading"
-        className="learning-card subject-card mb-7 rounded-3xl p-5 sm:p-7"
-      >
-        <div className="mb-5 flex items-end justify-between gap-4">
-          <div>
-            <p className="learning-step text-xs font-black tracking-[.16em]">
-              STEP 1
-            </p>
-            <h2 id="subject-heading" className="!m-0 !text-2xl">
-              Choose a subject
-            </h2>
-          </div>
-          <span className="learning-card-note hidden text-sm sm:block">
-            You can learn at a different level in each subject.
-          </span>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {(
-            [
-              "ELA",
-              "MATH",
-              "SCIENCE",
-              "SOCIAL_STUDIES",
-              "HEALTH",
-              "PHYSICAL_EDUCATION",
-              "FINE_ARTS",
-              "COMPUTER_SCIENCE",
-              "INFORMATION_LITERACY",
-            ] as const
-          ).map((subject) => {
-            const isSelected = selectedSubject === subject;
-            return (
-              <button
-                className={`${isSelected ? "selected" : "secondary"} subject-choice !min-h-32 !rounded-2xl !p-6 !text-left`}
-                key={subject}
-                onClick={() => setSelectedSubject(subject)}
-                aria-pressed={isSelected}
-              >
-                <span aria-hidden="true" className="subject-icon">
-                  {subject === "ELA"
-                    ? "Aa"
-                    : subject === "MATH"
-                      ? "1+2"
-                      : subject === "SCIENCE"
-                        ? "✦"
-                        : subject === "SOCIAL_STUDIES"
-                          ? "⌂"
-                          : subject === "HEALTH"
-                            ? "♥"
-                            : subject === "PHYSICAL_EDUCATION"
-                              ? "↟"
-                              : subject === "FINE_ARTS"
-                                ? "✎"
-                                : subject === "COMPUTER_SCIENCE"
-                                  ? "⌘"
-                                  : "⌕"}
-                </span>
-                <span>
-                  <strong className="block text-xl">
-                    {subject === "ELA"
-                      ? "Reading & Language"
-                      : subject === "MATH"
-                        ? "Math"
-                        : subject === "SCIENCE"
-                          ? "Science"
-                          : subject === "SOCIAL_STUDIES"
-                            ? "Social Studies"
-                            : subject === "HEALTH"
-                              ? "Health"
-                              : subject === "PHYSICAL_EDUCATION"
-                                ? "Physical Education"
-                                : subject === "FINE_ARTS"
-                                  ? "Fine Arts"
-                                  : subject === "COMPUTER_SCIENCE"
-                                    ? "Computer Science"
-                                    : "Information Literacy"}
-                  </strong>
-                  <small className="mt-1 block text-sm">
-                    {gradeName(
-                      student?.curriculumLevels?.[subject] ?? student?.grade,
-                    )}
-                  </small>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section
-        aria-labelledby="activity-heading"
-        className="learning-card activity-card mb-7 rounded-3xl p-5 sm:p-7"
-      >
-        <p className="learning-step text-xs font-black tracking-[.16em]">
-          STEP 2
-        </p>
-        <h2 id="activity-heading" className="!mb-2 !mt-1 !text-2xl">
-          Start your activity
-        </h2>
-        <p className="learning-card-note mb-5">
-          {selectedSubject === "MATH"
-            ? "Practice follows a small set of next number skills. Hands-on activities with an adult build mathematical reasoning with real objects and drawings."
-            : selectedSubject === "SCIENCE"
-              ? "Oklahoma science is learned through hands-on investigations with an adult."
-              : selectedSubject === "SOCIAL_STUDIES"
-                ? "Oklahoma social studies is learned through conversations, maps, sources, and real-life inquiry with an adult."
-                : selectedSubject === "HEALTH"
-                  ? "Oklahoma health is learned through safe, age-appropriate conversations and everyday healthy routines with an adult."
-                  : selectedSubject === "PHYSICAL_EDUCATION"
-                    ? "Physical education is guided movement. Choose a clear, safe space and complete each activity with an adult."
-                    : selectedSubject === "FINE_ARTS"
-                      ? "Fine arts uses making, performing, noticing, and reflecting across dance, drama, media arts, music, and visual art with an adult."
-                      : selectedSubject === "COMPUTER_SCIENCE"
-                        ? "Computer science uses safe hands-on and unplugged investigations of data, algorithms, programming, networks, and computing systems with an adult."
-                        : selectedSubject === "INFORMATION_LITERACY"
-                          ? "Information literacy uses books, people, libraries, and safe supervised digital tools to ask questions, research, organize ideas, and share learning."
-                          : "Practice follows a small set of next skills. A diagnostic finds the best place to focus next."}
-        </p>
-        {resumableAssessment && (
-          <div className="level-panel mb-5 rounded-2xl p-5" role="status">
-            <strong className="block text-lg">
-              Your{" "}
-              {resumableAssessment.mode === "practice"
-                ? "lesson"
-                : "learning check"}{" "}
-              is saved
-            </strong>
-            <span className="learning-card-note mb-3 mt-1 block">
-              Continue with activity {resumableAssessment.session.position + 1}{" "}
-              right where you stopped.
+      <div className="dash-grid">
+        <section
+          aria-labelledby="subject-heading"
+          className="dash-card dash-subjects"
+        >
+          <div className="section-head">
+            <div>
+              <p className="learning-step">Step 1</p>
+              <h2 id="subject-heading">Choose a subject</h2>
+            </div>
+            <span className="learning-card-note">
+              You can learn at a different level in each subject.
             </span>
-            <button
-              className="activity-button !rounded-2xl"
-              disabled={isLoading}
-              onClick={resumeAssessment}
-            >
-              RESUME{" "}
-              {resumableAssessment.mode === "practice"
-                ? "LESSON"
-                : resumableAssessment.mode === "placement"
-                  ? "PLACEMENT"
-                  : "DIAGNOSTIC"}{" "}
-              <span aria-hidden="true">→</span>
-            </button>
           </div>
-        )}
-        {!isAdultObservedOnly && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button
-              className="activity-button !min-h-16 !rounded-2xl"
-              disabled={isLoading}
-              onClick={() => void start("practice")}
-            >
-              START PRACTICE
-            </button>
-            <button
-              className="activity-button secondary !min-h-16 !rounded-2xl"
-              disabled={isLoading}
-              onClick={() => void start("diagnostic")}
-            >
-              {resumableAssessment
-                ? "START NEW DIAGNOSTIC"
-                : "START DIAGNOSTIC"}
-            </button>
+          <div className="subject-grid">
+            {SUBJECT_ORDER.map((subjectId) => {
+              const details = SUBJECT_DETAILS[subjectId];
+              return (
+                <button
+                  className="subject-tile"
+                  data-subject={subjectId}
+                  key={subjectId}
+                  onClick={() => setSelectedSubject(subjectId)}
+                  aria-pressed={selectedSubject === subjectId}
+                >
+                  <span aria-hidden="true" className="subject-icon">
+                    {details.icon}
+                  </span>
+                  <span>
+                    <span className="subject-name">{details.label}</span>
+                    <span className="subject-level">
+                      {gradeName(
+                        student?.curriculumLevels?.[subjectId] ?? student?.grade,
+                      )}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
-        )}
-        {!isAdultObservedOnly && (
-          <p className="learning-card-note mt-4">
-            The learning check starts with Kindergarten skills and adapts
-            through Grade 2. It checks each important skill area more than once
-            and asks a few more activities when an answer pattern is unclear.
-            You can take a break and continue later.
-          </p>
-        )}
-      </section>
-
-      {lessonPlan && (
-        <section
-          aria-labelledby="guided-lesson-heading"
-          className="learning-card guided-lesson-card mb-7 rounded-3xl p-5 sm:p-7"
-        >
-          <p className="learning-step text-xs font-black tracking-[.16em]">
-            GUIDED LESSON
-          </p>
-          <h2 id="guided-lesson-heading" className="!mb-2 !mt-1 !text-2xl">
-            {lessonPlan.title}
-          </h2>
-          <p className="learning-card-note mb-5">{lessonPlan.summary}</p>
-          <button
-            className="secondary !rounded-2xl"
-            onClick={() => openLesson(lessonPlan.id)}
-          >
-            OPEN {lessonPlan.days.length}-DAY LESSON
-          </button>
         </section>
-      )}
 
-      {roadmap && (
-        <section
-          aria-labelledby="roadmap-heading"
-          className="learning-card mb-7 rounded-3xl p-5 sm:p-7"
-        >
-          <p className="learning-step text-xs font-black tracking-[.16em]">
-            YOUR ROADMAP
-          </p>
-          <h2 id="roadmap-heading" className="!mb-2 !mt-1 !text-2xl">
-            {roadmap.title}
-          </h2>
-          <p className="learning-card-note mb-5">{roadmap.introduction}</p>
-          <ol className="grid gap-3 sm:grid-cols-2">
-            {roadmap.units.map((unit, index) => (
-              <li className="level-panel rounded-2xl p-4" key={unit.title}>
-                <strong className="learning-step block text-xs">
-                  UNIT {index + 1}
-                </strong>
-                <span className="mt-1 block text-lg font-black">
-                  {unit.title}
-                </span>
-                <span className="mt-1 block text-sm">{unit.focus}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-
-      <details className="adult-tools group rounded-3xl p-5 sm:p-7">
-        <summary className="cursor-pointer list-none text-xl font-black marker:hidden">
-          <span className="flex items-center justify-between">
-            Parent & teacher tools{" "}
+        <aside aria-labelledby="activity-heading" className="dash-session">
+          <p className="learning-step">Step 2</p>
+          <h2 id="activity-heading">Start your activity</h2>
+          <div className="session-subject">
             <span
               aria-hidden="true"
-              className="text-2xl transition-transform group-open:rotate-45"
+              className="subject-icon"
+              data-subject={selectedSubject}
             >
-              ＋
+              {subject.icon}
             </span>
-          </span>
-        </summary>
-        <div className="adult-tools-content mt-6 pt-6">
-          <p className="learning-card-note mb-5 max-w-2xl">
-            These tools require an adult verification code and should be
-            completed with the student.
-          </p>
-          <label className="!my-0 !max-w-sm font-bold">
-            Verification code
-            <input
-              value={proctorCode}
-              onChange={(event) => setProctorCode(event.target.value)}
-              inputMode="numeric"
-              type="password"
-              autoComplete="one-time-code"
-            />
-          </label>
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
-            {!isAdultObservedOnly && (
-              <button
-                className="secondary !rounded-2xl"
-                disabled={isLoading || !proctorCode}
-                onClick={() => void start("placement")}
-              >
-                NEW-STUDENT PLACEMENT
-              </button>
-            )}
-            {!isAdultObservedOnly && (
-              <button
-                className="secondary !rounded-2xl"
-                disabled={isLoading || !proctorCode}
-                onClick={() => void start("proctored")}
-              >
-                PROCTORED CHECK
-              </button>
-            )}
-            <button
-              className="secondary !rounded-2xl"
-              disabled={isLoading || !proctorCode}
-              onClick={() => void start("adultScored")}
-            >
-              {adultActivityLabel}
-            </button>
+            <span>
+              <span className="session-subject-name">{subject.label}</span>
+              <span className="session-subject-level">
+                {gradeName(selectedLevel)}
+              </span>
+            </span>
           </div>
-          <div className="level-panel mt-7 rounded-2xl p-5">
-            <h3 className="mb-3 text-lg font-black">Set subject level</h3>
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="!my-0">
-                Level for{" "}
-                {selectedSubject === "ELA"
-                  ? "Reading & Language"
-                  : selectedSubject === "MATH"
-                    ? "Math"
-                    : selectedSubject === "SCIENCE"
-                      ? "Science"
-                      : selectedSubject === "SOCIAL_STUDIES"
-                        ? "Social Studies"
-                        : selectedSubject === "HEALTH"
-                          ? "Health"
-                          : selectedSubject === "PHYSICAL_EDUCATION"
-                            ? "Physical Education"
-                            : selectedSubject === "FINE_ARTS"
-                              ? "Fine Arts"
-                              : selectedSubject === "COMPUTER_SCIENCE"
-                                ? "Computer Science"
-                                : "Information Literacy"}
-                <select
-                  value={placementGrade}
-                  onChange={(event) =>
-                    setPlacementGrade(event.target.value as LearningLevel)
-                  }
-                >
-                  <option value="K">Kindergarten</option>
-                  <option value="GRADE_1">Grade 1</option>
-                  <option value="GRADE_2">Grade 2</option>
-                </select>
-              </label>
-              <button
-                className="secondary"
-                disabled={!proctorCode}
-                onClick={() => void updatePlacement()}
-              >
-                SAVE LEVEL
+          <p className="learning-card-note session-intro">
+            {subject.activityNote}
+          </p>
+          {resumableAssessment && (
+            <div className="level-panel" role="status">
+              <strong>Your {savedActivityName} is saved</strong>
+              <p className="learning-card-note">
+                Continue with activity {resumableAssessment.session.position + 1}{" "}
+                right where you stopped.
+              </p>
+              <button disabled={isLoading} onClick={resumeAssessment}>
+                Resume {resumeName} <span aria-hidden="true">→</span>
               </button>
             </div>
+          )}
+          {isAdultObservedOnly ? (
+            <p className="session-note">
+              Begin this subject from Parent &amp; teacher tools below. It
+              needs your verification code.
+            </p>
+          ) : (
+            <>
+              <div className="session-actions">
+                <button
+                  disabled={isLoading}
+                  onClick={() => void start("practice")}
+                >
+                  Start practice
+                </button>
+                <button
+                  className="secondary"
+                  disabled={isLoading}
+                  onClick={() => void start("diagnostic")}
+                >
+                  {resumableAssessment
+                    ? "Start new diagnostic"
+                    : "Start diagnostic"}
+                </button>
+              </div>
+              <p className="session-note">
+                The learning check starts with Kindergarten skills and adapts
+                through Grade 2. It checks each important skill area more than
+                once and asks a few more activities when an answer pattern is
+                unclear. You can take a break and continue later.
+              </p>
+            </>
+          )}
+        </aside>
+
+        {lessonPlan && (
+          <section
+            aria-labelledby="guided-lesson-heading"
+            className="dash-card dash-lesson"
+          >
+            <p className="learning-step">Guided lesson</p>
+            <h2 id="guided-lesson-heading">{lessonPlan.title}</h2>
+            <p className="learning-card-note">{lessonPlan.summary}</p>
+            <button className="secondary" onClick={() => openLesson(lessonPlan.id)}>
+              Open {lessonPlan.days.length}-day lesson
+            </button>
+          </section>
+        )}
+
+        {roadmap && (
+          <section
+            aria-labelledby="roadmap-heading"
+            className="dash-card dash-roadmap"
+          >
+            <p className="learning-step">Your roadmap</p>
+            <h2 id="roadmap-heading">{roadmap.title}</h2>
+            <p className="learning-card-note">{roadmap.introduction}</p>
+            <ol className="roadmap-list" role="list">
+              {roadmap.units.map((unit, index) => (
+                <li className="roadmap-unit" key={unit.title}>
+                  <span aria-hidden="true" className="unit-num">
+                    {index + 1}
+                  </span>
+                  <span>
+                    <span className="unit-title">{unit.title}</span>
+                    <span className="unit-focus">{unit.focus}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+
+        <details className="adult-tools">
+          <summary>
+            <span>
+              <span className="tools-title">Parent &amp; teacher tools</span>
+              <span className="tools-subtitle">
+                Placement, proctored checks, and levels
+              </span>
+            </span>
+          </summary>
+          <div className="adult-tools-content">
+            <p className="learning-card-note">
+              These tools require an adult verification code and should be
+              completed with the student.
+            </p>
+            <label>
+              Verification code
+              <input
+                value={proctorCode}
+                onChange={(event) => setProctorCode(event.target.value)}
+                inputMode="numeric"
+                type="password"
+                autoComplete="one-time-code"
+              />
+            </label>
+            <div className="tool-actions">
+              {!isAdultObservedOnly && (
+                <button
+                  className="secondary"
+                  disabled={isLoading || !proctorCode}
+                  onClick={() => void start("placement")}
+                >
+                  New-student placement
+                </button>
+              )}
+              {!isAdultObservedOnly && (
+                <button
+                  className="secondary"
+                  disabled={isLoading || !proctorCode}
+                  onClick={() => void start("proctored")}
+                >
+                  Proctored check
+                </button>
+              )}
+              <button
+                className="secondary"
+                disabled={isLoading || !proctorCode}
+                onClick={() => void start("adultScored")}
+              >
+                {subject.adultActivity}
+              </button>
+            </div>
+            <div className="level-panel">
+              <h3>Set subject level</h3>
+              <div className="level-row">
+                <label>
+                  Level for {subject.label}
+                  <select
+                    value={placementGrade}
+                    onChange={(event) =>
+                      setPlacementGrade(event.target.value as LearningLevel)
+                    }
+                  >
+                    <option value="K">Kindergarten</option>
+                    <option value="GRADE_1">Grade 1</option>
+                    <option value="GRADE_2">Grade 2</option>
+                  </select>
+                </label>
+                <button
+                  className="secondary"
+                  disabled={!proctorCode}
+                  onClick={() => void updatePlacement()}
+                >
+                  Save level
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      </details>
+        </details>
+      </div>
+
       {error && (
-        <p className="feedback mt-5" role="alert">
+        <p className="feedback" role="alert">
           {error}
         </p>
       )}
@@ -1364,10 +1347,10 @@ export function LearningApp(): JSX.Element {
                   navigate("/lessons");
                 }}
               >
-                SIGN IN OR CREATE A STUDENT
+                Sign in or create a student
               </button>
               <button className="secondary" onClick={() => navigate("/")}>
-                BACK TO MAIN MENU
+                Back to main menu
               </button>
             </div>
           </section>
@@ -1381,25 +1364,29 @@ export function LearningApp(): JSX.Element {
   return (
     <main className="learning-app">
       <section className="learning-shell">
-        <header>
+        <header className="learning-topbar">
           <button
             className="learning-home-button"
             onClick={() => navigate("/")}
           >
-            HOME
+            <span aria-hidden="true">←</span> Home
           </button>
           <nav aria-label="Learning navigation">
             <button
               className="learning-nav-button"
+              aria-current={location.pathname === "/learning" ? "page" : undefined}
               onClick={() => navigate("/learning")}
             >
-              LEARNING
+              Learning
             </button>
             <button
               className="learning-nav-button"
+              aria-current={
+                location.pathname === "/learning/progress" ? "page" : undefined
+              }
               onClick={() => navigate("/learning/progress")}
             >
-              PROGRESS
+              Progress
             </button>
           </nav>
         </header>
@@ -1433,7 +1420,7 @@ export function LearningApp(): JSX.Element {
               Learning and try again.
             </p>
             <button className="secondary" onClick={returnToLearning}>
-              BACK TO LEARNING
+              Back to learning
             </button>
           </section>
         )}
@@ -1457,10 +1444,10 @@ export function LearningApp(): JSX.Element {
                   )
                 }
               >
-                START NEW SESSION
+                Start new session
               </button>
               <Link className="secondary" to="/learning">
-                BACK TO LEARNING
+                Back to learning
               </Link>
             </div>
           </section>
@@ -1525,7 +1512,7 @@ export function LearningApp(): JSX.Element {
             </p>
             {session.assessmentStage && !result && (
               <button className="secondary" onClick={() => void takeBreak()}>
-                TAKE A BREAK
+                Take a break
               </button>
             )}
             {session.question.interaction.visual && (
@@ -1620,13 +1607,13 @@ export function LearningApp(): JSX.Element {
                     }
                     onClick={() => void scoreAdult(true)}
                   >
-                    SKILL DEMONSTRATED
+                    Skill demonstrated
                   </button>
                   <button
                     className="secondary"
                     onClick={() => void scoreAdult(false)}
                   >
-                    KEEP PRACTICING
+                    Keep practicing
                   </button>
                 </div>
               </section>
@@ -1692,7 +1679,7 @@ export function LearningApp(): JSX.Element {
                       setSequenceAnswer((current) => current.slice(0, -1))
                     }
                   >
-                    UNDO LAST
+                    Undo last
                   </button>
                 )}
               </section>
@@ -1766,7 +1753,7 @@ export function LearningApp(): JSX.Element {
               !hasPhonemeChoices &&
               location.pathname !== "/learning/adult-scored" && (
                 <button disabled={!canSubmit} onClick={() => void submit()}>
-                  CHECK ANSWER
+                  Check answer
                 </button>
               )}
             {result && (
@@ -1792,7 +1779,7 @@ export function LearningApp(): JSX.Element {
                     onClick={() => void advance()}
                     aria-label="Continue to the next activity"
                   >
-                    <span>CONTINUE</span>
+                    <span>Continue</span>
                     <span className="continue-arrow" aria-hidden="true">
                       →
                     </span>
@@ -1800,10 +1787,10 @@ export function LearningApp(): JSX.Element {
                 ) : (
                   <button disabled={isAdvancing} onClick={() => void advance()}>
                     {result.complete && result.placement
-                      ? "VIEW SKILLS PROGRESS"
+                      ? "View skills progress"
                       : result.complete
-                        ? "FINISH SESSION"
-                        : "TRY ANOTHER ONE"}
+                        ? "Finish session"
+                        : "Try another one"}
                   </button>
                 )}
               </>

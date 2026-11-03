@@ -65,14 +65,14 @@ function ChoiceBoard({ choices, selected, disabled, onSelect }: { choices: reado
 
 function CardWorkspace({ cards, answer, disabled, onChange, wordAudioText }: { cards: readonly string[]; answer: readonly string[]; disabled: boolean; onChange: (answer: string[]) => void; wordAudioText?: string }): JSX.Element {
   return <section className="lesson-card-workspace" aria-label="Build the word">
-    {wordAudioText && <button className="secondary word-audio-button" type="button" onClick={() => { stopSpeaking(); void speak(wordAudioText); }}>🔊 HEAR THE WORD</button>}
+    {wordAudioText && <button className="secondary word-audio-button" type="button" onClick={() => { stopSpeaking(); void speak(wordAudioText); }}>🔊 Hear the word</button>}
     <div className="word-slots" aria-live="polite">{cards.map((_, index) => <span key={index}>{answer[index] ?? "_"}</span>)}</div>
     <div className="letter-card-bank">{cards.map((card, index) => {
       const cardKey = `${card}-${index}`;
       const isUsed = answer.includes(card);
       return <button type="button" className="letter-card secondary" key={cardKey} disabled={disabled || isUsed} onClick={() => onChange([...answer, card])}>{card}</button>;
     })}</div>
-    {answer.length > 0 && !disabled && <button type="button" className="secondary" onClick={() => onChange(answer.slice(0, -1))}>UNDO LAST</button>}
+    {answer.length > 0 && !disabled && <button type="button" className="secondary" onClick={() => onChange(answer.slice(0, -1))}>Undo last</button>}
   </section>;
 }
 
@@ -137,14 +137,14 @@ function LessonControls({ activityId, isPresentationOnly, result, isBusy, isRequ
 }): JSX.Element {
   return <>
     {!isPresentationOnly && !result && <div className="lesson-support-row">
-      <button className="secondary" type="button" disabled={isRequestingHint || isBusy} onClick={onHint}>{isRequestingHint ? "GETTING A HINT…" : "GIVE ME A HINT"}</button>
+      <button className="secondary" type="button" disabled={isRequestingHint || isBusy} onClick={onHint}>{isRequestingHint ? "Getting a hint…" : "Give me a hint"}</button>
       {hint && <p className="lesson-hint" role="status">{hint.message}</p>}
       {hintError && <p className="lesson-hint is-error" role="alert">{hintError}</p>}
     </div>}
-    {!isPresentationOnly && !result && <button type="button" disabled={isBusy || !canSubmit} onClick={onSubmit}>CHECK MY WORK</button>}
+    {!isPresentationOnly && !result && <button type="button" disabled={isBusy || !canSubmit} onClick={onSubmit}>Check my work</button>}
     {result && <ProgressCelebration result={result} />}
-    {isPresentationOnly && <ContinueButton key={activityId} label="CONTINUE" disabled={isBusy} onFilled={onCompleteAndNext} />}
-    {result && <ContinueButton key={`${activityId}-result`} label={result.complete ? "FINISH SESSION" : result.correct ? "CONTINUE" : "TRY A FRESH ONE"} disabled={isBusy} onFilled={onNext} />}
+    {isPresentationOnly && <ContinueButton key={activityId} label="Continue" disabled={isBusy} onFilled={onCompleteAndNext} />}
+    {result && <ContinueButton key={`${activityId}-result`} label={result.complete ? "Finish session" : result.correct ? "Continue" : "Try a fresh one"} disabled={isBusy} onFilled={onNext} />}
   </>;
 }
 
@@ -202,7 +202,7 @@ export function KindergartenLessonActivity({ activity, position, length, result,
   return <section className="kindergarten-lesson" aria-labelledby="lesson-prompt">
     <div className="lesson-progress-row">
       <p className="eyebrow">{purposeLabel(activity.purpose)} · {position + 1} OF {length}</p>
-      <button className="secondary take-break-button" type="button" disabled={isBusy} onClick={() => void onTakeBreak()}>TAKE A BREAK</button>
+      <button className="secondary take-break-button" type="button" disabled={isBusy} onClick={() => void onTakeBreak()}>Take a break</button>
     </div>
     <div className="lesson-progress-track" role="progressbar" aria-label="Session progress" aria-valuemin={0} aria-valuemax={length} aria-valuenow={position + 1}><span style={{ width: `${((position + 1) / length) * 100}%` }} /></div>
     <TutorPanel activity={activity} result={result} />

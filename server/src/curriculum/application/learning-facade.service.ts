@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { evaluateAnswer } from "../domain/answer-evaluator";
 import type { AttemptEvent, DiagnosticPlacement, LearningSessionRecord } from "../domain/progress";
@@ -14,6 +14,8 @@ import {
   buildDiagnosticReport,
   createDiagnosticBlueprint,
   createGradeDiagnosticBlueprint,
+  gradeDiagnosticPolicy,
+  gradeDiagnosticPolicyWithPassMark,
   diagnosticSessionLength,
   evidenceForSkill,
   markDiagnosticSkillUnavailable,
@@ -110,7 +112,7 @@ export class LearningFacadeService {
     return engine;
   }
 
-  async start(learnerId: string, purpose: SessionPurpose, seed = Math.floor(Math.random() * 2_147_483_647), submittedProctorCode?: string, grade = "K", subject?: LearningSubject) {
+  async start(learnerId: string, purpose: SessionPurpose, seed = Math.floor(Math.random() * 2_147_483_647), submittedProctorCode?: string, grade = "K", subject?: LearningSubject, passMark?: number) {
     if (requiresAdultCode(purpose) && (!this.proctorCode || submittedProctorCode !== this.proctorCode)) throw new ForbiddenException("A parent or teacher verification code is required to start a proctored assessment.");
     if (isAdaptiveAssessment(purpose) && subject !== "ELA" && subject !== "MATH") throw new ForbiddenException("Choose Reading & Language or Math before starting a diagnostic, placement check, or grade review.");
     const lessonCatalog = purpose === "practice" ? this.practiceLessonCatalog(grade, subject) : undefined;
@@ -130,7 +132,7 @@ export class LearningFacadeService {
     const activeTemplates = isAdaptiveAssessment(purpose) ? availableTemplates : purpose === "practice" ? selectNextLearningTemplates(templates, mastery) : purpose === "adultScored" ? selectNextLearningTemplates(templates, mastery, 1) : templates;
     if (!activeTemplates.length) throw new Error("All skills are mastered for now. Return when a scheduled review is due.");
     const diagnostic = isAdaptiveAssessment(purpose) ? startDiagnostic(isSingleGradeAssessment(purpose)
-      ? createGradeDiagnosticBlueprint(activeTemplates, subject as "ELA" | "MATH", subjectName(subject), grade)
+      ? createGradeDiagnosticBlueprint(activeTemplates, subject as "ELA" | "MATH", subjectName(subject), grade, passMark === undefined ? gradeDiagnosticPolicy : this.policyForPassMark(passMark))
       : createDiagnosticBlueprint(activeTemplates, subject as "ELA" | "MATH", subjectName(subject), seed)) : undefined;
     const selected = diagnostic ? this.requireDiagnosticTemplate(diagnostic, activeTemplates) : activeTemplates[seedAt(seed, 0) % activeTemplates.length];
     const sessionPurpose: SessionPurpose = purpose === "practice" && mastery.some((record) => record.standardId === selected.primaryStandardId && record.state === "reviewDue") ? "review" : purpose;
@@ -146,6 +148,11 @@ export class LearningFacadeService {
     this.sessions.set(session.id, session);
     await this.checkpoint(session);
     return this.view(session);
+  }
+
+  private policyForPassMark(passMark: number) {
+    try { return gradeDiagnosticPolicyWithPassMark(passMark); }
+    catch (error) { throw new BadRequestException((error as Error).message); }
   }
 
   private async startLessonSession(learnerId: string, seed: number, catalog: LessonCatalog) {
@@ -463,8 +470,9 @@ export class LearningFacadeService {
       learnerId: session.learnerId, grouping: report.grouping, grade: report.instructionalGrade, learningTargetIds,
       report: { ...report, assessmentKind: session.purpose } as unknown as Record<string, unknown>, completedAt: new Date()
     };
-    // A grade review is a one-off look at earlier material. It lists the skills to revisit but never changes what the student practices.
-    if (session.purpose !== "gradeReview") await Promise.all(learningTargetIds.map((standardId) => this.repository.saveLearningTarget({ learnerId: session.learnerId, standardId, active: true })));
+    // A grade review is a one-off look at earlier material, but the gaps it finds still become practice targets.
+    // It never changes the student's level or mastery records.
+    await Promise.all(learningTargetIds.map((standardId) => this.repository.saveLearningTarget({ learnerId: session.learnerId, standardId, active: true })));
     await this.repository.saveDiagnosticPlacement(placement);
     session.assessmentResult = placement;
     session.status = "completed";

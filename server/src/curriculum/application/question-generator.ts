@@ -17,6 +17,7 @@ import { gradeTwoLanguageVariants } from "../data/grade-two-language-variants";
 import { gradeOneLanguageVariants } from "../data/grade-one-language-variants";
 import { kindergartenLanguageVariants } from "../data/kindergarten-language-variants";
 import { mathPracticeVariants } from "../data/math-practice-variants";
+import { conceptVariantsFor } from "../data/concept-variants";
 
 class Random {
   private state: number;
@@ -80,7 +81,7 @@ export function generateQuestion(template: QuestionTemplate, seed: string | numb
     interaction = choiceInteraction(random.shuffle(choices)); canonicalAnswer = answer; values = { tens, ones }; explanation = `${tens} tens and ${ones} ones make ${answer}.`;
   } else if (template.generator.kind === "gradeOneMath") {
     const skill = String(configuration.skill); let answer: string | number; let choices: Array<string | number>;
-    const variants = mathPracticeVariants[skill] ?? [];
+    const variants = [...(mathPracticeVariants[skill] ?? []), ...conceptVariantsFor(skill)];
     const alternate = variants.length > 0 && random.integer(0, 1) === 1 ? variants[random.integer(0, variants.length - 1)] : null;
     if (alternate) { answer = alternate.answer; choices = alternate.choices; values = { question: alternate.question }; explanation = alternate.explanation; }
     else if (skill === "1.OA.A.1") { const left = random.integer(3, 10); const right = random.integer(2, 9); answer = left + right; choices = [answer, answer - 1, answer + 1]; values = { question: `Molly has ${left} shells and finds ${right} more. How many shells does she have?` }; explanation = `${left} plus ${right} equals ${answer}.`; }
@@ -110,7 +111,7 @@ export function generateQuestion(template: QuestionTemplate, seed: string | numb
     const skill = String(configuration.skill);
     let answer: string | number;
     let choices: Array<string | number>;
-    const variants = mathPracticeVariants[skill] ?? [];
+    const variants = [...(mathPracticeVariants[skill] ?? []), ...conceptVariantsFor(skill)];
     const alternate = variants.length > 0 && random.integer(0, 1) === 1 ? variants[random.integer(0, variants.length - 1)] : null;
     if (alternate) { answer = alternate.answer; choices = alternate.choices; values = { question: alternate.question }; explanation = alternate.explanation; }
     else if (skill === "K.CC.B.4.a") {
@@ -297,14 +298,14 @@ export function generateQuestion(template: QuestionTemplate, seed: string | numb
     };
     const baseItem = items[skill];
     if (!baseItem) throw new Error(`Unsupported Kindergarten ELA skill: ${skill}`);
-    const variants = [...(kindergartenReadingVariants[skill] ?? []), ...(kindergartenLanguageVariants[skill] ?? [])];
+    const variants = [...(kindergartenReadingVariants[skill] ?? []), ...(kindergartenLanguageVariants[skill] ?? []), ...conceptVariantsFor(skill)];
     const item = [baseItem, ...variants][random.integer(0, variants.length)];
     interaction = choiceInteraction(random.shuffle(item.choices)); canonicalAnswer = item.answer; values = { question: item.question }; explanation = item.explanation;
   } else if (template.generator.kind === "gradeTwoMath") {
     const skill = String(configuration.skill);
     let answer: string | number;
     let choices: Array<string | number>;
-    const variants = mathPracticeVariants[skill] ?? [];
+    const variants = [...(mathPracticeVariants[skill] ?? []), ...conceptVariantsFor(skill)];
     const alternate = variants.length > 0 && random.integer(0, 1) === 1 ? variants[random.integer(0, variants.length - 1)] : null;
     if (alternate) { answer = alternate.answer; choices = alternate.choices; values = { question: alternate.question }; explanation = alternate.explanation; }
     else if (skill === "2.OA.A.1") {
@@ -420,7 +421,7 @@ export function generateQuestion(template: QuestionTemplate, seed: string | numb
     };
     const baseItem = items[skill];
     if (!baseItem) throw new Error(`Unsupported Grade 2 ELA skill: ${skill}`);
-    const variants = [...(gradeTwoReadingVariants[skill] ?? []), ...(gradeTwoLanguageVariants[skill] ?? [])];
+    const variants = [...(gradeTwoReadingVariants[skill] ?? []), ...(gradeTwoLanguageVariants[skill] ?? []), ...conceptVariantsFor(skill)];
     const item = [baseItem, ...variants][random.integer(0, variants.length)];
     interaction = choiceInteraction(random.shuffle(item.choices)); canonicalAnswer = item.answer; values = { question: item.question }; explanation = item.explanation;
   } else if (template.generator.kind === "gradeOneElaAdult") {
@@ -435,7 +436,7 @@ export function generateQuestion(template: QuestionTemplate, seed: string | numb
     canonicalAnswer = null; interaction = adultScoredInteraction(skill, prompt, "Common Core State Standards for English Language Arts"); values = { question: prompt }; explanation = "Your adult will decide whether this skill was demonstrated.";
   } else if (template.generator.kind === "gradeOneEla") {
     const skill = String(configuration.skill); let answer: string; let choices: string[];
-    const languageVariants = gradeOneLanguageVariants[skill] ?? [];
+    const languageVariants = [...(gradeOneLanguageVariants[skill] ?? []), ...conceptVariantsFor(skill)];
     const alternate = languageVariants.length > 0 && random.integer(0, 1) === 1 ? languageVariants[random.integer(0, languageVariants.length - 1)] : null;
     if (alternate) { answer = alternate.answer; choices = alternate.choices; values = { question: alternate.question }; explanation = alternate.explanation; }
     else if (skill === "1.L.1.b") { const words = [["dog", "run", "blue"], ["teacher", "jump", "quickly"]][random.integer(0, 1)]; answer = words[0]; choices = words; values = { question: "Which word is a noun?" }; explanation = `${answer} names a person, place, thing, or animal.`; }

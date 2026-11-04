@@ -96,9 +96,11 @@ Attempts retain the database uniqueness key `(learnerId, sessionId, questionInst
 
 The diagnostic no longer sends a learner back through grades they have already tested out of. It covers the learner's current grade only, and it is thorough: every standard in that grade's subject is checked, not a sample of two per domain. Each standard needs two correct answers to count as secure; unclear patterns get up to two extra questions. A strong learner finishes in one pass (roughly 46 to 96 questions depending on grade and subject), and the session length shown to the child reflects what is still required.
 
-Results name the grade, how many skills are secure, the evidence confidence, and the gaps. Skills that are not secure become practice targets as before.
+Results name the grade, how many skills are secure, the evidence confidence, and the gaps. Skills that are not secure become practice targets.
 
-Looking at earlier grades is a one-off **grade review**, started manually by a parent or teacher. It requires the adult code, works for Reading & Language and Math, and uses the same complete-coverage check on the chosen earlier grade. A review does not change the learner's level, does not create practice targets, and does not affect mastery. Its result lists skills to revisit and is stored apart from the latest diagnostic ("Latest grade review" in Progress).
+The **pass mark** is chosen by the student's parent or teacher before the diagnostic or review starts (50% of skills up to every skill; 75% by default). It is the share of skills that must be secure for each domain, and for the whole grade, to count as passed. How a single skill is judged does not change: it needs its own evidence.
+
+Looking at earlier grades is a one-off **grade review**, started manually by a parent or teacher. It requires the adult code, works for Reading & Language and Math, and uses the same complete-coverage check on the chosen earlier grade with the same adjustable pass mark. A review does not change the learner's level and does not count toward mastery. Skills it finds shaky are added to the practice plan like a diagnostic's gaps. Its result is stored apart from the latest diagnostic ("Latest grade review" in Progress).
 
 The placement check (sampled, climbing from Kindergarten) remains available as an adult-started check for the initial level.
 
@@ -113,7 +115,7 @@ The persisted/API report includes overall level, confidence, evidence coverage, 
 ## Known POC limitations
 
 - Representative standards are algorithmically selected because no human-authored blueprint file yet identifies the most instructionally important subskills.
-- Most standards have one generator template, so independence relies on reviewed seed variation rather than multiple item forms.
+- Every Reading, Language, and Math standard has at least five genuinely different questions (`concept-variants-*.ts` adds to what the generators produce), each testing a different part of the standard instead of rewording one idea. A test in `concept-variants.spec.ts` fails if any standard drops below five.
 - Difficulty metadata is largely band 1 and cannot yet support calibrated ability estimates.
 - Automatic placement covers ELA and Math only. Writing, speaking/listening, investigations, and performance tasks need adult evidence.
 - Grade 2 is the assessment ceiling, so a strong result means “at least Grade 2 within this catalog,” not a measured Grade 3 placement.

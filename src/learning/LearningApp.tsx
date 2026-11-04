@@ -214,6 +214,17 @@ type LearningPurpose =
 type LearningLevel = "K" | "GRADE_1" | "GRADE_2";
 type ReviewGrade = "K" | "1" | "2";
 
+const PASS_MARKS = [
+  { value: 0.5, label: "50% of skills" },
+  { value: 0.6, label: "60% of skills" },
+  { value: 0.7, label: "70% of skills" },
+  { value: 0.75, label: "75% of skills (default)" },
+  { value: 0.8, label: "80% of skills" },
+  { value: 0.9, label: "90% of skills" },
+  { value: 1, label: "Every skill" },
+] as const;
+const DEFAULT_PASS_MARK = 0.75;
+
 const REVIEW_GRADES: ReadonlyArray<{ value: ReviewGrade; label: string }> = [
   { value: "K", label: "Kindergarten" },
   { value: "1", label: "Grade 1" },
@@ -312,8 +323,8 @@ function PlacementSummary({
       )}
       {isReview && (
         <p>
-          This review does not change the student&apos;s level or practice
-          plan.
+          This review does not change the student&apos;s level. Skills to
+          revisit are added to the practice plan.
         </p>
       )}
       <p>
@@ -660,6 +671,8 @@ function LearningDashboard({
   setPlacementGrade,
   reviewGrade,
   setReviewGrade,
+  passMark,
+  setPassMark,
   resumableAssessment,
   resumeAssessment,
   start,
@@ -678,6 +691,8 @@ function LearningDashboard({
   setPlacementGrade: (grade: LearningLevel) => void;
   reviewGrade: ReviewGrade;
   setReviewGrade: (grade: ReviewGrade) => void;
+  passMark: number;
+  setPassMark: (passMark: number) => void;
   resumableAssessment: ResumableLearningSession | null;
   resumeAssessment: () => void;
   start: (purpose: LearningPurpose, gradeOverride?: ReviewGrade) => Promise<void>;
@@ -827,6 +842,19 @@ function LearningDashboard({
                     : "Start diagnostic"}
                 </button>
               </div>
+              <label className="pass-mark">
+                Pass mark for diagnostics and reviews
+                <select
+                  value={passMark}
+                  onChange={(event) => setPassMark(Number(event.target.value))}
+                >
+                  {PASS_MARKS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <p className="session-note">
                 The diagnostic checks every skill in {gradeName(selectedLevel)}
                 and never goes back to earlier grades. It asks about each skill
@@ -932,7 +960,8 @@ function LearningDashboard({
                 <h3>Review earlier grade material</h3>
                 <p className="learning-card-note">
                   A one-time check of an earlier grade in {subject.label}. It
-                  does not change the student&apos;s level or practice plan.
+                  does not change the student&apos;s level, and any skills that
+                  need work are added to the practice plan.
                 </p>
                 {earlierGrades.length > 0 ? (
                   <div className="level-row">
@@ -1040,6 +1069,7 @@ export function LearningApp(): JSX.Element {
   const [proctorCode, setProctorCode] = useState("");
   const [placementGrade, setPlacementGrade] = useState<LearningLevel>("K");
   const [reviewGrade, setReviewGrade] = useState<ReviewGrade>("K");
+  const [passMark, setPassMark] = useState<number>(DEFAULT_PASS_MARK);
   const [progress, setProgress] = useState<Progress>({
     attempts: [],
     mastery: [],
@@ -1197,6 +1227,9 @@ export function LearningApp(): JSX.Element {
           : undefined,
         gradeOverride ?? curriculumGrade,
         selectedSubject,
+        purpose === "diagnostic" || purpose === "gradeReview"
+          ? passMark
+          : undefined,
       );
       setSession(next);
       setResumableAssessment(null);
@@ -1510,6 +1543,8 @@ export function LearningApp(): JSX.Element {
             setPlacementGrade={setPlacementGrade}
             reviewGrade={reviewGrade}
             setReviewGrade={setReviewGrade}
+            passMark={passMark}
+            setPassMark={setPassMark}
             resumableAssessment={resumableAssessment}
             resumeAssessment={resumeAssessmentSession}
             start={start}

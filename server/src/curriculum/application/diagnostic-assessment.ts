@@ -50,6 +50,20 @@ export const gradeDiagnosticPolicy: DiagnosticPolicy = {
   coverage: "complete"
 };
 
+export const minimumPassMark = 0.5;
+export const maximumPassMark = 1;
+
+/**
+ * The pass mark is the share of skills that must be secure for a domain, and for the whole grade, to count as mastered.
+ * A parent or teacher chooses it; a skill itself is still judged by its own evidence.
+ */
+export function gradeDiagnosticPolicyWithPassMark(passMark: number): DiagnosticPolicy {
+  if (!Number.isFinite(passMark) || passMark < minimumPassMark || passMark > maximumPassMark) {
+    throw new Error(`The pass mark must be between ${minimumPassMark * 100}% and ${maximumPassMark * 100}%.`);
+  }
+  return { ...gradeDiagnosticPolicy, domainMasteryThreshold: passMark, gradeMasteryThreshold: passMark };
+}
+
 export interface DiagnosticSkillRequirement {
   standardId: string;
   domain: string;

@@ -140,7 +140,7 @@ describe("LearningFacadeService", () => {
     expect(repository.targets.map((target) => target.standardId).sort()).toEqual([...(result?.placement?.learningTargetIds ?? [])].sort());
   });
 
-  it("runs a lower-grade review only when an adult asks, without moving the student or their practice queue", async () => {
+  it("runs a lower-grade review only when an adult asks, saves its gaps as practice targets, and leaves level and mastery alone", async () => {
     const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
     await expect(service.start("grade-two", "gradeReview", 42, undefined, "1", "MATH")).rejects.toThrow("verification code");
     await expect(service.start("grade-two", "gradeReview", 42, "wrong-code", "1", "MATH")).rejects.toThrow("verification code");
@@ -153,8 +153,19 @@ describe("LearningFacadeService", () => {
     expect(repository.attempts.every((attempt) => attempt.purpose === "gradeReview" && attempt.primaryStandardId.startsWith("1."))).toBe(true);
     expect(result).toMatchObject({ complete: true, placement: { grouping: "Math", grade: "1", assessmentKind: "gradeReview", isGradeMastered: false } });
     expect(result?.placement?.learningTargetIds.length).toBeGreaterThan(0);
-    expect(repository.targets).toHaveLength(0);
+    expect(repository.targets.map((target) => target.standardId).sort()).toEqual([...(result?.placement?.learningTargetIds ?? [])].sort());
     expect(repository.mastery.every((record) => record.scoredAttemptCount === 0)).toBe(true);
+  });
+
+  it("uses the pass mark an adult chooses and rejects one that makes no sense", async () => {
+    const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
+    await expect(service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH", 0.2)).rejects.toThrow("pass mark");
+    await expect(service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH", 1.5)).rejects.toThrow("pass mark");
+
+    const started = await service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH", 0.6);
+    const session = (service as unknown as { sessions: Map<string, { diagnostic: { blueprint: { grades: Array<{ masteryThreshold: number; domains: Array<{ masteryThreshold: number }> }> } } }> }).sessions.get(started.sessionId)!;
+    expect(session.diagnostic.blueprint.grades[0].masteryThreshold).toBe(0.6);
+    expect(session.diagnostic.blueprint.grades[0].domains.every((domain) => domain.masteryThreshold === 0.6 || domain.masteryThreshold === 1)).toBe(true);
   });
 
   it("keeps a grade review separate from the student's latest diagnostic", async () => {

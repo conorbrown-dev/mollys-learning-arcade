@@ -107,7 +107,7 @@ function save(session: SessionView, context?: { mode: LearningMode; subject?: Le
   } satisfies SavedLearningSession));
 }
 export const learningApplication = {
-  async start(purpose: LearningMode, proctorCode?: string, grade = "K", subject?: LearningSubject): Promise<SessionView> { authenticatedStudentId(); const session = await studentApi<SessionView>("/curriculum/learning/sessions", "POST", { purpose, grade, ...(subject ? { subject } : {}), ...(proctorCode ? { proctorCode } : {}) }); save(session, { mode: purpose, subject }); return session; },
+  async start(purpose: LearningMode, proctorCode?: string, grade = "K", subject?: LearningSubject, passMark?: number): Promise<SessionView> { authenticatedStudentId(); const session = await studentApi<SessionView>("/curriculum/learning/sessions", "POST", { purpose, grade, ...(subject ? { subject } : {}), ...(proctorCode ? { proctorCode } : {}), ...(passMark !== undefined ? { passMark } : {}) }); save(session, { mode: purpose, subject }); return session; },
   async restore(): Promise<SessionView | null> { try { const saved = readSavedSession(); return saved ? await studentApi<SessionView>(`/curriculum/learning/sessions/${saved.sessionId}`) : null; } catch { localStorage.removeItem(key); return null; } },
   async resumableSession(): Promise<ResumableLearningSession | null> {
     try {

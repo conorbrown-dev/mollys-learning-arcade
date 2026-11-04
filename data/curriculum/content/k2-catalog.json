@@ -531,8 +531,9 @@
       "audioSupported": true,
       "provenance": "Project original",
       "review": {
-        "status": "reviewed",
-        "reviewer": "Project content review"
+        "status": "retired",
+        "reviewer": "Project content review",
+        "note": "No question generator exists for this template; Grade 2 2.RL.1 is covered by 2.rl.1.key-details."
       }
     },
     {

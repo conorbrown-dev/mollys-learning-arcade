@@ -4,11 +4,13 @@ import {
   buildDiagnosticReport,
   createDiagnosticBlueprint,
   createGradeDiagnosticBlueprint,
+  gradeDiagnosticPolicyWithPassMark,
   diagnosticSessionLength,
   evaluateCurrentGrade,
   recordDiagnosticProbe,
   selectNextDiagnosticSkill,
   startDiagnostic,
+  type DiagnosticPolicy,
   type DiagnosticState
 } from "./diagnostic-assessment";
 
@@ -117,10 +119,10 @@ describe("current-grade diagnostic", () => {
   const standardTemplate = (grade: "K" | "1" | "2", domain: string, number: number): QuestionTemplate => ({ ...template(grade, domain), id: `${grade.toLowerCase()}.${domain.toLowerCase()}.${number}`, primaryStandardId: `${grade}.${domain}.${number}` });
   const gradeTemplates = (["K", "1", "2"] as const).flatMap((grade) => domains.flatMap((domain) => Array.from({ length: standardsPerDomain }, (_unused, index) => standardTemplate(grade, domain, index + 1))));
   const gradeTwoStandards = domains.flatMap((domain) => Array.from({ length: standardsPerDomain }, (_unused, index) => `2.${domain}.${index + 1}`));
-  const gradeBlueprint = () => createGradeDiagnosticBlueprint(gradeTemplates, "ELA", "Reading & Language", "2");
+  const gradeBlueprint = (policy?: DiagnosticPolicy) => createGradeDiagnosticBlueprint(gradeTemplates, "ELA", "Reading & Language", "2", policy);
 
-  function runGradeDiagnostic(profile: (standardId: string, attempt: number) => boolean) {
-    let state = startDiagnostic(gradeBlueprint());
+  function runGradeDiagnostic(profile: (standardId: string, attempt: number) => boolean, policy?: DiagnosticPolicy) {
+    let state = startDiagnostic(gradeBlueprint(policy));
     let item = 0;
     while (!state.isComplete && item < 500) {
       const skill = selectNextDiagnosticSkill(state);
@@ -138,6 +140,18 @@ describe("current-grade diagnostic", () => {
     expect(blueprint.grades[0].grade).toBe("2");
     expect(blueprint.coverage).toBe("complete");
     expect(blueprint.grades[0].domains.flatMap((domain) => domain.skills.map((skill) => skill.standardId)).sort()).toEqual([...gradeTwoStandards].sort());
+  });
+
+  it("lets the parent or teacher choose how many skills must be secure for the grade to count as passed", () => {
+    const missesTwoSkills = (standardId: string) => !gradeTwoStandards.slice(0, 2).includes(standardId);
+    const strict = runGradeDiagnostic(missesTwoSkills, gradeDiagnosticPolicyWithPassMark(1)).report;
+    const relaxed = runGradeDiagnostic(missesTwoSkills, gradeDiagnosticPolicyWithPassMark(0.5)).report;
+    expect(strict.isGradeMastered).toBe(false);
+    expect(relaxed.isGradeMastered).toBe(true);
+    expect(relaxed.needsReinforcement.sort()).toEqual(gradeTwoStandards.slice(0, 2).sort());
+    expect(gradeBlueprint(gradeDiagnosticPolicyWithPassMark(0.6)).grades[0].masteryThreshold).toBe(0.6);
+    expect(() => gradeDiagnosticPolicyWithPassMark(0.2)).toThrow("pass mark");
+    expect(() => gradeDiagnosticPolicyWithPassMark(Number.NaN)).toThrow("pass mark");
   });
 
   it("finishes a strong learner after one pass over the grade without moving to another grade", () => {

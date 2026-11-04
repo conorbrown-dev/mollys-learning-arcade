@@ -377,6 +377,7 @@
   border-radius: var(--l-radius);
   background: var(--l-accent-soft);
 }
+.pass-mark { display: grid; gap: 6px; margin: 14px 0 0; max-width: 320px; font-weight: 600; }
 .level-panel strong { display: block; }
 .level-panel .learning-card-note { margin: 2px 0 12px; }
 .level-panel h3 { margin-bottom: 10px; }

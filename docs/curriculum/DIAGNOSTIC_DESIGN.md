@@ -72,7 +72,7 @@ Within a standard, unseen templates are preferred. When only one generator exist
 
 ## Floor, ceiling, and strand placement
 
-Assessment starts at Kindergarten to establish a verified floor. Failure at Kindergarten yields Kindergarten as the starting instructional level and stops upward testing. Passing a grade opens the next grade. The first grade with incomplete prerequisites becomes the recommended starting instructional level. Passing the Grade 2 ceiling yields Grade 2 because the catalog cannot yet justify a higher recommendation.
+**This climbing behavior applies to the placement check only.** The diagnostic itself covers the learner's current grade only (see "Current-grade diagnostic and manual grade review" below). Placement starts at Kindergarten to establish a verified floor. Failure at Kindergarten yields Kindergarten as the starting instructional level and stops upward testing. Passing a grade opens the next grade. The first grade with incomplete prerequisites becomes the recommended starting instructional level. Passing the Grade 2 ceiling yields Grade 2 because the catalog cannot yet justify a higher recommendation.
 
 Each domain also retains its own instructional level. A domain that passes Kindergarten but not Grade 1 is reported as Grade 1, while stronger domains may retain Grade 2 evidence. The simplified overall grade does not erase those strand results.
 
@@ -92,6 +92,18 @@ The report exposes coverage numerically and lists unresolved skills rather than 
 
 Attempts retain the database uniqueness key `(learnerId, sessionId, questionInstanceId, purpose)`. Repository insertion is idempotent, and session evidence also de-duplicates question-instance IDs. A completed session is checkpointed before its report is returned.
 
+## Current-grade diagnostic and manual grade review
+
+The diagnostic no longer sends a learner back through grades they have already tested out of. It covers the learner's current grade only, and it is thorough: every standard in that grade's subject is checked, not a sample of two per domain. Each standard needs two correct answers to count as secure; unclear patterns get up to two extra questions. A strong learner finishes in one pass (roughly 46 to 96 questions depending on grade and subject), and the session length shown to the child reflects what is still required.
+
+Results name the grade, how many skills are secure, the evidence confidence, and the gaps. Skills that are not secure become practice targets.
+
+The **pass mark** is chosen by the student's parent or teacher before the diagnostic or review starts (50% of skills up to every skill; 75% by default). It is the share of skills that must be secure for each domain, and for the whole grade, to count as passed. How a single skill is judged does not change: it needs its own evidence.
+
+Looking at earlier grades is a one-off **grade review**, started manually by a parent or teacher. It requires the adult code, works for Reading & Language and Math, and uses the same complete-coverage check on the chosen earlier grade with the same adjustable pass mark. A review does not change the learner's level and does not count toward mastery. Skills it finds shaky are added to the practice plan like a diagnostic's gaps. Its result is stored apart from the latest diagnostic ("Latest grade review" in Progress).
+
+The placement check (sampled, climbing from Kindergarten) remains available as an adult-started check for the initial level.
+
 ## Learning relationship
 
 Diagnostic attempts remain in the same immutable attempt stream as learning and practice. To avoid claiming durable classroom mastery from a short placement assessment, they do not directly grant the existing spaced-practice `mastered` state. Instead, the detailed diagnostic evidence becomes part of the durable learner report, and `EMERGING`/`DEVELOPING` standards become active `CurriculumLearningTarget` records. Existing practice selection prioritizes these targets. Thus placement immediately changes instruction without conflating placement confidence with long-term retained mastery.
@@ -103,7 +115,7 @@ The persisted/API report includes overall level, confidence, evidence coverage, 
 ## Known POC limitations
 
 - Representative standards are algorithmically selected because no human-authored blueprint file yet identifies the most instructionally important subskills.
-- Most standards have one generator template, so independence relies on reviewed seed variation rather than multiple item forms.
+- Every Reading, Language, and Math standard has at least five genuinely different questions (`concept-variants-*.ts` adds to what the generators produce), each testing a different part of the standard instead of rewording one idea. A test in `concept-variants.spec.ts` fails if any standard drops below five.
 - Difficulty metadata is largely band 1 and cannot yet support calibrated ability estimates.
 - Automatic placement covers ELA and Math only. Writing, speaking/listening, investigations, and performance tasks need adult evidence.
 - Grade 2 is the assessment ceiling, so a strong result means “at least Grade 2 within this catalog,” not a measured Grade 3 placement.

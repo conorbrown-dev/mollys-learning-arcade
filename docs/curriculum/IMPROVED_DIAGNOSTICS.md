@@ -636,14 +636,14 @@ Learner rapidly demonstrates Kindergarten and Grade 1 mastery.
 
 Expected:
 
-Diagnostic efficiently climbs toward Grade 2 rather than forcing every possible Kindergarten question.
+Placement (not the diagnostic, which now covers the current grade only) efficiently climbs toward Grade 2 rather than forcing every possible Kindergarten question.
 Scenario F — Foundational learner
 
 Learner struggles with foundational Kindergarten skills.
 
 Expected:
 
-Diagnostic stops climbing and identifies the appropriate instructional starting point.
+Placement stops climbing and identifies the appropriate instructional starting point.
 Scenario G — Restart
 
 Diagnostic is partially complete and the server restarts.
@@ -784,7 +784,7 @@ Adaptive probing exists.
 
 Uncertainty results in additional assessment rather than arbitrary placement.
 
-Higher grades can be probed when lower grades are clearly mastered.
+Higher grades can be probed by placement when lower grades are clearly mastered. Earlier grades are only revisited through a parent/teacher-triggered grade review.
 
 Strand-level mastery can be represented.
 

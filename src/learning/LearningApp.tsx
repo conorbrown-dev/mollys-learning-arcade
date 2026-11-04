@@ -16,6 +16,7 @@ import {
   type LessonPlanActivity,
   type LessonPlanView,
   type LessonSupportLevel,
+  type GradeProgress,
   type PlacementResult,
   type ResumableLearningSession,
   type SessionView,
@@ -23,6 +24,7 @@ import {
 import { coreCourseRoadmap } from "./coreCourseRoadmaps";
 import { KindergartenLessonActivity } from "./KindergartenLessonActivity";
 import { GuidedLessonPlayer } from "./GuidedLessonPlayer";
+import { GradeProgressCard } from "./GradeProgressCard";
 import "./learning.css";
 
 type ProgressAttempt = {
@@ -50,6 +52,7 @@ type Progress = {
   latestDiagnosticPlacement: PlacementResult | null;
   latestGradeReview?: PlacementResult | null;
   latestAssessmentSessionId: string | null;
+  gradeProgress?: GradeProgress[];
 };
 type Classification = Record<string, string>;
 type BrowserRecognition = {
@@ -214,16 +217,20 @@ type LearningPurpose =
 type LearningLevel = "K" | "GRADE_1" | "GRADE_2";
 type ReviewGrade = "K" | "1" | "2";
 
+// 75% is the lowest pass mark allowed; adults may only raise the bar.
 const PASS_MARKS = [
-  { value: 0.5, label: "50% of skills" },
-  { value: 0.6, label: "60% of skills" },
-  { value: 0.7, label: "70% of skills" },
-  { value: 0.75, label: "75% of skills (default)" },
+  { value: 0.75, label: "75% of skills (minimum)" },
   { value: 0.8, label: "80% of skills" },
+  { value: 0.85, label: "85% of skills" },
   { value: 0.9, label: "90% of skills" },
+  { value: 0.95, label: "95% of skills" },
   { value: 1, label: "Every skill" },
 ] as const;
 const DEFAULT_PASS_MARK = 0.75;
+const GRADE_PROGRESS_SUBJECTS: ReadonlyArray<GradeProgress["subject"]> = [
+  "ELA",
+  "MATH",
+];
 
 const REVIEW_GRADES: ReadonlyArray<{ value: ReviewGrade; label: string }> = [
   { value: "K", label: "Kindergarten" },
@@ -838,8 +845,8 @@ function LearningDashboard({
                   onClick={() => void start("diagnostic")}
                 >
                   {resumableAssessment
-                    ? "Start new diagnostic"
-                    : "Start diagnostic"}
+                    ? "Start new grade diagnostic"
+                    : "Start grade diagnostic"}
                 </button>
               </div>
               <label className="pass-mark">
@@ -856,8 +863,12 @@ function LearningDashboard({
                 </select>
               </label>
               <p className="session-note">
-                The diagnostic checks every skill in {gradeName(selectedLevel)}
-                and never goes back to earlier grades. It asks about each skill
+                <strong>For current students.</strong> The grade diagnostic
+                checks every skill in {gradeName(selectedLevel)} to show how
+                the student is doing and how close they are to the next grade.
+                It never goes back to earlier grades. Students new to the app
+                start with New-student placement in Parent &amp; teacher tools
+                instead. The diagnostic asks about each skill
                 at least twice, with a few more activities when an answer
                 pattern is unclear. It is a long check, so take breaks and
                 continue later.
@@ -918,6 +929,15 @@ function LearningDashboard({
               These tools require an adult verification code and should be
               completed with the student.
             </p>
+            {!isAdultObservedOnly && (
+              <p className="learning-card-note">
+                <strong>New-student placement</strong> is for a student who is
+                new to the app. It samples skills from Kindergarten upward to
+                find a starting grade, and is usually taken once. Current
+                students use the <strong>grade diagnostic</strong> instead,
+                which checks every skill in their grade.
+              </p>
+            )}
             <label>
               Verification code
               <input
@@ -1109,6 +1129,14 @@ export function LearningApp(): JSX.Element {
         : null;
     return note ? [{ standardId: attempt.primaryStandardId, note }] : [];
   });
+  const currentGradeProgress = GRADE_PROGRESS_SUBJECTS.flatMap((subject) =>
+    (progress.gradeProgress ?? []).filter(
+      (item) =>
+        item.subject === subject &&
+        item.grade ===
+          learningGrade(student?.curriculumLevels?.[subject] ?? student?.grade),
+    ),
+  );
   const latestDiagnosticProgress = groupAttempts(
     progress.attempts.filter(
       (attempt) => attempt.sessionId === progress.latestAssessmentSessionId,
@@ -1913,10 +1941,10 @@ export function LearningApp(): JSX.Element {
                     placement={result.placement}
                     title={
                       location.pathname === "/learning/placement"
-                        ? "Placement complete"
+                        ? "New-student placement complete"
                         : location.pathname === "/learning/grade-review"
                           ? "Review complete"
-                          : "Diagnostic complete"
+                          : "Grade diagnostic complete"
                     }
                   />
                 )}
@@ -1955,6 +1983,12 @@ export function LearningApp(): JSX.Element {
               Your latest diagnostic is kept separate from earlier practice so
               its results are clear.
             </p>
+            {currentGradeProgress.map((gradeProgress) => (
+              <GradeProgressCard
+                key={`${gradeProgress.subject}-${gradeProgress.grade}`}
+                progress={gradeProgress}
+              />
+            ))}
             {progress.skillProgress.length > 0 && (
               <section aria-labelledby="foundational-skills-heading">
                 <h2 id="foundational-skills-heading">
@@ -1974,7 +2008,15 @@ export function LearningApp(): JSX.Element {
             {progress.latestDiagnosticPlacement && (
               <PlacementSummary
                 placement={progress.latestDiagnosticPlacement}
-                title="Latest diagnostic"
+                title={
+                  progress.latestDiagnosticPlacement.assessmentKind ===
+                  "placement"
+                    ? "Latest new-student placement"
+                    : progress.latestDiagnosticPlacement.assessmentKind ===
+                        "diagnostic"
+                      ? "Latest grade diagnostic"
+                      : "Latest diagnostic"
+                }
               />
             )}
             {progress.latestGradeReview && (

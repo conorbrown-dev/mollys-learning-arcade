@@ -378,6 +378,63 @@
   background: var(--l-accent-soft);
 }
 .pass-mark { display: grid; gap: 6px; margin: 14px 0 0; max-width: 320px; font-weight: 600; }
+
+/* Grade progress */
+
+.grade-progress {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--l-line);
+  border-radius: var(--l-radius);
+  background: var(--l-surface);
+}
+.grade-progress-total { margin: 4px 0 10px; }
+.grade-progress-meter {
+  position: relative;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--l-line);
+  overflow: hidden;
+}
+.grade-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--secure-share);
+  background: var(--l-accent);
+}
+.grade-progress-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--pass-mark);
+  width: 3px;
+  background: var(--l-accent-strong);
+}
+.grade-progress-readiness { margin: 10px 0; font-weight: 600; }
+.grade-progress-readiness.is-ready {
+  padding: 8px 12px;
+  border: 1px solid var(--l-success-line);
+  border-radius: var(--l-radius);
+  background: var(--l-success-bg);
+  color: var(--l-success-ink);
+}
+.grade-progress-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  color: var(--l-muted);
+}
+.grade-progress-domains { width: 100%; margin-top: 8px; border-collapse: collapse; }
+.grade-progress-domains caption { text-align: left; font-weight: 600; padding-bottom: 4px; }
+.grade-progress-domains th,
+.grade-progress-domains td { padding: 6px 8px; border-top: 1px solid var(--l-line); text-align: left; }
+.grade-progress-gaps { margin-top: 12px; }
+.grade-progress-gaps summary { min-height: 44px; cursor: pointer; font-weight: 600; }
+.grade-progress-gaps li { margin: 6px 0; }
+.grade-progress-standard { font-weight: 600; color: var(--l-muted); }
 .level-panel strong { display: block; }
 .level-panel .learning-card-note { margin: 2px 0 12px; }
 .level-panel h3 { margin-bottom: 10px; }

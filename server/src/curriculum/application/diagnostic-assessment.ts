@@ -50,8 +50,10 @@ export const gradeDiagnosticPolicy: DiagnosticPolicy = {
   coverage: "complete"
 };
 
-export const minimumPassMark = 0.5;
+/** Parents and teachers can raise the bar, but never below three quarters of the grade's skills. */
+export const minimumPassMark = 0.75;
 export const maximumPassMark = 1;
+export const defaultPassMark = minimumPassMark;
 
 /**
  * The pass mark is the share of skills that must be secure for a domain, and for the whole grade, to count as mastered.

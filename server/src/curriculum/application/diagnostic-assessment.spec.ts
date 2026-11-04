@@ -142,15 +142,16 @@ describe("current-grade diagnostic", () => {
     expect(blueprint.grades[0].domains.flatMap((domain) => domain.skills.map((skill) => skill.standardId)).sort()).toEqual([...gradeTwoStandards].sort());
   });
 
-  it("lets the parent or teacher choose how many skills must be secure for the grade to count as passed", () => {
-    const missesTwoSkills = (standardId: string) => !gradeTwoStandards.slice(0, 2).includes(standardId);
-    const strict = runGradeDiagnostic(missesTwoSkills, gradeDiagnosticPolicyWithPassMark(1)).report;
-    const relaxed = runGradeDiagnostic(missesTwoSkills, gradeDiagnosticPolicyWithPassMark(0.5)).report;
+  it("lets the parent or teacher raise the pass mark, but never below 75%", () => {
+    const missesOneSkill = (standardId: string) => standardId !== gradeTwoStandards[0];
+    const strict = runGradeDiagnostic(missesOneSkill, gradeDiagnosticPolicyWithPassMark(1)).report;
+    const standard = runGradeDiagnostic(missesOneSkill, gradeDiagnosticPolicyWithPassMark(0.75)).report;
     expect(strict.isGradeMastered).toBe(false);
-    expect(relaxed.isGradeMastered).toBe(true);
-    expect(relaxed.needsReinforcement.sort()).toEqual(gradeTwoStandards.slice(0, 2).sort());
-    expect(gradeBlueprint(gradeDiagnosticPolicyWithPassMark(0.6)).grades[0].masteryThreshold).toBe(0.6);
-    expect(() => gradeDiagnosticPolicyWithPassMark(0.2)).toThrow("pass mark");
+    expect(standard.isGradeMastered).toBe(true);
+    expect(standard.needsReinforcement).toEqual([gradeTwoStandards[0]]);
+    expect(gradeBlueprint(gradeDiagnosticPolicyWithPassMark(0.9)).grades[0].masteryThreshold).toBe(0.9);
+    expect(() => gradeDiagnosticPolicyWithPassMark(0.7)).toThrow("between 75% and 100%");
+    expect(() => gradeDiagnosticPolicyWithPassMark(0.5)).toThrow("pass mark");
     expect(() => gradeDiagnosticPolicyWithPassMark(Number.NaN)).toThrow("pass mark");
   });
 

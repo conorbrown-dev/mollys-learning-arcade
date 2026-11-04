@@ -47,6 +47,25 @@ export type PlacementResult = {
   unresolvedSkills?: string[];
   strandPlacements?: Array<{ domain: string; label: string; instructionalGrade: string; status: "ready" | "needsReinforcement" | "unresolved" }>;
 };
+/** Where a student stands on one standard: secure, needs work, being practiced, or not checked yet. */
+export type StandardStanding = "secure" | "needsWork" | "inProgress" | "notChecked";
+/** How the student is doing in one grade of one subject, and how close they are to the next grade. */
+export type GradeProgress = {
+  subject: "ELA" | "MATH";
+  grade: "K" | "1" | "2";
+  totalStandards: number;
+  secure: number;
+  needsWork: number;
+  inProgress: number;
+  notChecked: number;
+  shareSecure: number;
+  passMark: number;
+  standardsToNextGrade: number;
+  isReadyForNextGrade: boolean;
+  lastAssessedAt: string | null;
+  domains: Array<{ domain: string; label: string; total: number; secure: number; needsWork: number }>;
+  standards: Array<{ standardId: string; statement: string | null; domain: string; standing: StandardStanding }>;
+};
 export type AnswerResult = { correct: boolean; explanation: string; masteryState: string; complete: boolean; retry?: boolean; placement?: PlacementResult; celebrate?: boolean; evidenceMode?: LessonActivityView["evidenceMode"]; misconception?: string; tutorState?: LessonActivityView["tutor"]["state"]; tutorMessage?: string };
 export type HintResult = { message: string; narration?: string; highestSupport: LessonSupportLevel; evidenceMode: LessonActivityView["evidenceMode"] };
 export type StudentPlacement = { id: string; username: string; grade: CurriculumGrade; subjects: CurriculumSubject[]; curriculumLevels: Partial<Record<CurriculumSubject, CurriculumGrade>> };
@@ -125,5 +144,5 @@ export const learningApplication = {
   async completeActivity(sessionId: string, instanceId: string): Promise<{ complete: boolean }> { return studentApi<{ complete: boolean }>(`/curriculum/learning/sessions/${sessionId}/activities/${instanceId}/complete`, "POST"); },
   async hint(sessionId: string, instanceId: string, level?: LessonSupportLevel): Promise<HintResult> { return studentApi<HintResult>(`/curriculum/learning/sessions/${sessionId}/activities/${instanceId}/hints`, "POST", level ? { level } : {}); },
   async lessonPlans(): Promise<LessonPlanView[]> { authenticatedStudentId(); return studentApi<LessonPlanView[]>("/curriculum/learning/lesson-plans"); },
-  async progress() { authenticatedStudentId(); return studentApi<{ attempts: Array<{ sessionId: string; primaryStandardId: string; correct: boolean; usedHint: boolean; independent: boolean; purpose: string; submittedAnswer: unknown }>; mastery: Array<{ standardId: string; state: string; nextReviewAt: string | null }>; skillProgress: Array<{ skillId: string; skillName: string; domain: string; state: string }>; latestDiagnosticPlacement: PlacementResult | null; latestGradeReview?: PlacementResult | null; latestAssessmentSessionId: string | null }>("/curriculum/learning/progress"); }
+  async progress() { authenticatedStudentId(); return studentApi<{ attempts: Array<{ sessionId: string; primaryStandardId: string; correct: boolean; usedHint: boolean; independent: boolean; purpose: string; submittedAnswer: unknown }>; mastery: Array<{ standardId: string; state: string; nextReviewAt: string | null }>; skillProgress: Array<{ skillId: string; skillName: string; domain: string; state: string }>; latestDiagnosticPlacement: PlacementResult | null; latestGradeReview?: PlacementResult | null; latestAssessmentSessionId: string | null; gradeProgress?: GradeProgress[] }>("/curriculum/learning/progress"); }
 };

@@ -121,7 +121,7 @@ test("Take a break saves a diagnostic and resumes the exact activity after reloa
   await page.addInitScript(() => localStorage.setItem("mollys-learning-academy.student-session", JSON.stringify({ token: "test-token", student: { id: "test-student", username: "Test Student", grade: "K", subjects: ["ELA", "MATH"] } })));
 
   await page.goto("/learning");
-  await page.getByRole("button", { name: "START DIAGNOSTIC" }).click();
+  await page.getByRole("button", { name: "START GRADE DIAGNOSTIC" }).click();
   await expect(page.getByText("KINDERGARTEN LEARNING CHECK · ACTIVITY 5")).toBeVisible();
   await page.getByRole("button", { name: "TAKE A BREAK" }).click();
   await expect(page.getByRole("button", { name: "RESUME DIAGNOSTIC" })).toBeVisible();
@@ -174,7 +174,7 @@ test("a completed diagnostic shows its placement and does not call checked skill
   await page.addInitScript(() => localStorage.setItem("mollys-learning-academy.student-session", JSON.stringify({ token: "test-token", student: { id: "test-student", username: "Test Student", grade: "K", subjects: ["ELA", "MATH"] } })));
 
   await page.goto("/learning");
-  await page.getByRole("button", { name: "START DIAGNOSTIC" }).click();
+  await page.getByRole("button", { name: "START GRADE DIAGNOSTIC" }).click();
   await page.getByRole("button", { name: "l", exact: true }).click();
   await page.getByRole("button", { name: "CHECK ANSWER" }).click();
   await expect(page.getByText("Diagnostic complete")).toBeVisible();

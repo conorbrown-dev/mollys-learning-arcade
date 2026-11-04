@@ -157,15 +157,38 @@ describe("LearningFacadeService", () => {
     expect(repository.mastery.every((record) => record.scoredAttemptCount === 0)).toBe(true);
   });
 
-  it("uses the pass mark an adult chooses and rejects one that makes no sense", async () => {
+  it("uses the pass mark an adult chooses and rejects one below 75%", async () => {
     const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
-    await expect(service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH", 0.2)).rejects.toThrow("pass mark");
+    await expect(service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH", 0.5)).rejects.toThrow("pass mark");
     await expect(service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH", 1.5)).rejects.toThrow("pass mark");
 
-    const started = await service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH", 0.6);
+    const started = await service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH", 0.9);
     const session = (service as unknown as { sessions: Map<string, { diagnostic: { blueprint: { grades: Array<{ masteryThreshold: number; domains: Array<{ masteryThreshold: number }> }> } } }> }).sessions.get(started.sessionId)!;
-    expect(session.diagnostic.blueprint.grades[0].masteryThreshold).toBe(0.6);
-    expect(session.diagnostic.blueprint.grades[0].domains.every((domain) => domain.masteryThreshold === 0.6 || domain.masteryThreshold === 1)).toBe(true);
+    expect(session.diagnostic.blueprint.grades[0].masteryThreshold).toBe(0.9);
+    expect(session.diagnostic.blueprint.grades[0].domains.every((domain) => domain.masteryThreshold === 0.9 || domain.masteryThreshold === 1)).toBe(true);
+  });
+
+  it("knows how the student is doing in each grade, what needs work, and how close the next grade is", async () => {
+    const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
+    const before = await service.progressFor("grade-two");
+    const mathTwoBefore = before.gradeProgress.find((progress) => progress.subject === "MATH" && progress.grade === "2")!;
+    expect(mathTwoBefore).toMatchObject({ secure: 0, isReadyForNextGrade: false });
+    expect(mathTwoBefore.notChecked).toBe(mathTwoBefore.totalStandards);
+    expect(before.gradeProgress).toHaveLength(6);
+
+    const diagnostic = await service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH", 0.9);
+    await answerUntilComplete(service, diagnostic.sessionId, (correctAnswer) => correctAnswer);
+    const review = await service.start("grade-two", "gradeReview", 43, "adult-code", "1", "MATH");
+    await answerUntilComplete(service, review.sessionId, () => "definitely incorrect");
+
+    const after = await service.progressFor("grade-two");
+    const mathTwo = after.gradeProgress.find((progress) => progress.subject === "MATH" && progress.grade === "2")!;
+    const mathOne = after.gradeProgress.find((progress) => progress.subject === "MATH" && progress.grade === "1")!;
+    expect(mathTwo).toMatchObject({ passMark: 0.9, standardsToNextGrade: 0, isReadyForNextGrade: true, needsWork: 0 });
+    expect(mathTwo.secure).toBe(mathTwo.totalStandards);
+    expect(mathOne).toMatchObject({ secure: 0, isReadyForNextGrade: false });
+    expect(mathOne.needsWork).toBe(mathOne.totalStandards);
+    expect(mathOne.standards.every((standard) => standard.statement)).toBe(true);
   });
 
   it("keeps a grade review separate from the student's latest diagnostic", async () => {

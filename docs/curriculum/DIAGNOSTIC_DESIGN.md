@@ -92,17 +92,38 @@ The report exposes coverage numerically and lists unresolved skills rather than 
 
 Attempts retain the database uniqueness key `(learnerId, sessionId, questionInstanceId, purpose)`. Repository insertion is idempotent, and session evidence also de-duplicates question-instance IDs. A completed session is checkpointed before its report is returned.
 
+## Which check to use
+
+| Check | Who it is for | What it covers | Who starts it |
+| --- | --- | --- | --- |
+| **New-student placement** | A student who is new to the app | A sample of skills, climbing from Kindergarten until the student stumbles, to find a starting grade. Usually taken once. | Parent or teacher (adult code) |
+| **Grade diagnostic** | A current student | Every skill in the student's current grade, to show how they are doing and how close the next grade is. Never goes back to earlier grades. | Student, parent, or teacher |
+| **Grade review** | A current student with suspected gaps from an earlier grade | Every skill in one earlier grade, as a one-off. | Parent or teacher (adult code) |
+
 ## Current-grade diagnostic and manual grade review
 
 The diagnostic no longer sends a learner back through grades they have already tested out of. It covers the learner's current grade only, and it is thorough: every standard in that grade's subject is checked, not a sample of two per domain. Each standard needs two correct answers to count as secure; unclear patterns get up to two extra questions. A strong learner finishes in one pass (roughly 46 to 96 questions depending on grade and subject), and the session length shown to the child reflects what is still required.
 
 Results name the grade, how many skills are secure, the evidence confidence, and the gaps. Skills that are not secure become practice targets.
 
-The **pass mark** is chosen by the student's parent or teacher before the diagnostic or review starts (50% of skills up to every skill; 75% by default). It is the share of skills that must be secure for each domain, and for the whole grade, to count as passed. How a single skill is judged does not change: it needs its own evidence.
+The **pass mark** is chosen by the student's parent or teacher before the diagnostic or review starts. It can be 75% of skills (the minimum and default) up to every skill; it can be raised but never lowered below 75%. It is the share of skills that must be secure for each domain, and for the whole grade, to count as passed. How a single skill is judged does not change: it needs its own evidence.
 
 Looking at earlier grades is a one-off **grade review**, started manually by a parent or teacher. It requires the adult code, works for Reading & Language and Math, and uses the same complete-coverage check on the chosen earlier grade with the same adjustable pass mark. A review does not change the learner's level and does not count toward mastery. Skills it finds shaky are added to the practice plan like a diagnostic's gaps. Its result is stored apart from the latest diagnostic ("Latest grade review" in Progress).
 
-The placement check (sampled, climbing from Kindergarten) remains available as an adult-started check for the initial level.
+New-student placement (sampled, climbing from Kindergarten) remains available as an adult-started check for a student's starting level.
+
+## Grade progress
+
+The Progress page shows, for Reading & Language and Math, how the student is doing in their current grade. This lives in `grade-progress.ts` and is returned as `gradeProgress` from the progress endpoint for every K–2 grade.
+
+Each standard in the grade gets one standing, decided by the newest evidence the app has for it:
+
+- **Secure**: practice mastery, all lesson skills for that standard mastered, or a diagnostic or review that showed it.
+- **Needs work**: the latest diagnostic or review found gaps or could not confirm it.
+- **Being practiced**: the student is learning it in practice or lessons, but has not shown it yet.
+- **Not checked yet**: nothing has asked about it.
+
+From these the page reports how many skills are secure out of the total, a breakdown by area, the list of skills that need work, and how many more skills must become secure to reach the pass mark for the next grade. The pass mark comes from the latest grade diagnostic of that grade, or 75% if there has not been one.
 
 ## Learning relationship
 

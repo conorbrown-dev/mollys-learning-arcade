@@ -1,7 +1,8 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { evaluateAnswer } from "../domain/answer-evaluator";
-import type { AttemptEvent, DiagnosticPlacement, LearningSessionRecord } from "../domain/progress";
+import type { AttemptEvent, DiagnosticPlacement, LearningSessionRecord, MasteryRecord } from "../domain/progress";
+import type { SkillProgressRecord } from "../domain/skill-progress";
 import type { ProgressRepository } from "../domain/progress.repository";
 import type { QuestionInstance, QuestionTemplate } from "../domain/question-template";
 import { PrismaProgressRepository } from "../infrastructure/prisma-progress.repository";
@@ -15,6 +16,7 @@ import {
   createDiagnosticBlueprint,
   createGradeDiagnosticBlueprint,
   gradeDiagnosticPolicy,
+  defaultPassMark,
   gradeDiagnosticPolicyWithPassMark,
   diagnosticSessionLength,
   evidenceForSkill,
@@ -26,6 +28,8 @@ import {
   type DiagnosticState
 } from "./diagnostic-assessment";
 import { diagnosticQuestionFingerprint } from "./diagnostic-question-fingerprint";
+import { buildGradeProgress, type GradeProgress } from "./grade-progress";
+import { loadAndValidateVendoredStandards } from "../infrastructure/vendored-standards.validator";
 import { ProgressService } from "./progress-service";
 import { generateQuestion } from "./question-generator";
 import { LessonActivityEngine, activityByCheckpoint, activityView, evaluateLessonActivity, type LessonActivityCheckpoint } from "./lesson-activity-engine";
@@ -67,6 +71,7 @@ export const CURRICULUM_PROCTOR_CODE = Symbol("CURRICULUM_PROCTOR_CODE");
 export const KINDERGARTEN_ELA_ENABLED = Symbol("KINDERGARTEN_ELA_ENABLED");
 export const KINDERGARTEN_ELA_AUDIO_READY = Symbol("KINDERGARTEN_ELA_AUDIO_READY");
 const seedAt = (seed: number, position: number) => Math.abs(Math.imul(seed ^ (position + 1), 2654435761)) >>> 0;
+const GRADES = ["K", "1", "2"] as const;
 const subjectName = (subject: LearningSubject | undefined) => subject === "ELA" ? "Reading & Language" : subject === "MATH" ? "Math" : subject?.split("_").map((word) => `${word[0]}${word.slice(1).toLowerCase()}`).join(" ") ?? "Learning";
 const catalogSubject = (subject: LearningSubject | undefined) => subject === "SOCIAL_STUDIES" ? "socialStudies" : subject === "PHYSICAL_EDUCATION" ? "physicalEducation" : subject === "FINE_ARTS" ? "fineArts" : subject === "COMPUTER_SCIENCE" ? "computerScience" : subject === "INFORMATION_LITERACY" ? "informationLiteracy" : subject?.toLowerCase();
 const isAdaptiveAssessment = (purpose: SessionPurpose) => purpose === "diagnostic" || purpose === "placement" || purpose === "gradeReview";
@@ -429,7 +434,30 @@ export class LearningFacadeService {
     const isGradeReview = (placement: DiagnosticPlacement) => placement.report.assessmentKind === "gradeReview";
     const latestPlacement = newestFirst.find((placement) => !isGradeReview(placement));
     const latestReview = newestFirst.find(isGradeReview);
-    return { attempts, mastery, skillProgress: skillProgress.map((record) => ({ ...record, skillName: lessonCatalogSkill(record.skillId).name, domain: lessonCatalogSkill(record.skillId).domain })), latestDiagnosticPlacement: latestPlacement ? this.placementView(latestPlacement) : null, latestGradeReview: latestReview ? this.placementView(latestReview) : null, latestAssessmentSessionId: latestAssessment?.sessionId ?? null };
+    const gradeProgress = await this.gradeProgressFor(mastery, skillProgress, placements);
+    return { gradeProgress, attempts, mastery, skillProgress: skillProgress.map((record) => ({ ...record, skillName: lessonCatalogSkill(record.skillId).name, domain: lessonCatalogSkill(record.skillId).domain })), latestDiagnosticPlacement: latestPlacement ? this.placementView(latestPlacement) : null, latestGradeReview: latestReview ? this.placementView(latestReview) : null, latestAssessmentSessionId: latestAssessment?.sessionId ?? null };
+  }
+
+  /** How the student is doing in every Reading & Language and Math grade: what is secure, what needs work, and how close each grade is to passed. */
+  private async gradeProgressFor(mastery: MasteryRecord[], skillProgress: SkillProgressRecord[], assessments: DiagnosticPlacement[]): Promise<GradeProgress[]> {
+    const [catalog, standardsDataset] = await Promise.all([loadK2ContentCatalog(), loadAndValidateVendoredStandards()]);
+    const statements = new Map(standardsDataset.records.map((record) => [record.officialId, record.statement]));
+    const lessonSkills = skillProgress.flatMap((record) => {
+      try {
+        const standardIds = lessonCatalogSkill(record.skillId).standardMappings.filter((mapping) => mapping.framework === "COMMON_CORE" && mapping.relationship === "PRIMARY").map((mapping) => mapping.standardId);
+        return [{ standardIds, state: record.state, updatedAt: record.updatedAt }];
+      } catch { return []; }
+    });
+    const subjects = [{ subject: "ELA" as const, catalog: "ela" }, { subject: "MATH" as const, catalog: "math" }];
+    return subjects.flatMap(({ subject, catalog: catalogSubjectName }) => GRADES.map((grade) => {
+      const standardIds = [...new Set(catalog.templates
+        .filter((template) => template.review.status === "reviewed" && template.diagnosticEligible && !template.generatorKind.endsWith("Adult") && template.subject === catalogSubjectName && template.grade === grade)
+        .map((template) => template.standardId))].sort();
+      return buildGradeProgress({
+        subject, grade, mastery, lessonSkills, assessments, defaultPassMark,
+        standards: standardIds.map((standardId) => ({ standardId, statement: statements.get(standardId) ?? null }))
+      });
+    }));
   }
 
   async lessonPlans() { return loadProductionLessonPlans(); }
@@ -468,7 +496,7 @@ export class LearningFacadeService {
     const learningTargetIds = [...new Set([...report.needsReinforcement, ...report.criticalPrerequisiteGaps, ...report.unresolvedSkills])];
     const placement: DiagnosticPlacement = {
       learnerId: session.learnerId, grouping: report.grouping, grade: report.instructionalGrade, learningTargetIds,
-      report: { ...report, assessmentKind: session.purpose } as unknown as Record<string, unknown>, completedAt: new Date()
+      report: { ...report, assessmentKind: session.purpose, ...(isSingleGradeAssessment(session.purpose) ? { passMark: session.diagnostic!.blueprint.grades[0].masteryThreshold } : {}) } as unknown as Record<string, unknown>, completedAt: new Date()
     };
     // A grade review is a one-off look at earlier material, but the gaps it finds still become practice targets.
     // It never changes the student's level or mastery records.

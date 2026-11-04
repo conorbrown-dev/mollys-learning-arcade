@@ -72,7 +72,7 @@ Within a standard, unseen templates are preferred. When only one generator exist
 
 ## Floor, ceiling, and strand placement
 
-Assessment starts at Kindergarten to establish a verified floor. Failure at Kindergarten yields Kindergarten as the starting instructional level and stops upward testing. Passing a grade opens the next grade. The first grade with incomplete prerequisites becomes the recommended starting instructional level. Passing the Grade 2 ceiling yields Grade 2 because the catalog cannot yet justify a higher recommendation.
+**This climbing behavior applies to the placement check only.** The diagnostic itself covers the learner's current grade only (see "Current-grade diagnostic and manual grade review" below). Placement starts at Kindergarten to establish a verified floor. Failure at Kindergarten yields Kindergarten as the starting instructional level and stops upward testing. Passing a grade opens the next grade. The first grade with incomplete prerequisites becomes the recommended starting instructional level. Passing the Grade 2 ceiling yields Grade 2 because the catalog cannot yet justify a higher recommendation.
 
 Each domain also retains its own instructional level. A domain that passes Kindergarten but not Grade 1 is reported as Grade 1, while stronger domains may retain Grade 2 evidence. The simplified overall grade does not erase those strand results.
 
@@ -91,6 +91,16 @@ The report exposes coverage numerically and lists unresolved skills rather than 
 `CurriculumLearningSession.state` stores the current generated question (including its server-only answer), blueprint, evidence, stage, selected template IDs, and submitted instance IDs after every state transition. The service can rehydrate this state after a process restart. The browser's local session ID is only a pointer.
 
 Attempts retain the database uniqueness key `(learnerId, sessionId, questionInstanceId, purpose)`. Repository insertion is idempotent, and session evidence also de-duplicates question-instance IDs. A completed session is checkpointed before its report is returned.
+
+## Current-grade diagnostic and manual grade review
+
+The diagnostic no longer sends a learner back through grades they have already tested out of. It covers the learner's current grade only, and it is thorough: every standard in that grade's subject is checked, not a sample of two per domain. Each standard needs two correct answers to count as secure; unclear patterns get up to two extra questions. A strong learner finishes in one pass (roughly 46 to 96 questions depending on grade and subject), and the session length shown to the child reflects what is still required.
+
+Results name the grade, how many skills are secure, the evidence confidence, and the gaps. Skills that are not secure become practice targets as before.
+
+Looking at earlier grades is a one-off **grade review**, started manually by a parent or teacher. It requires the adult code, works for Reading & Language and Math, and uses the same complete-coverage check on the chosen earlier grade. A review does not change the learner's level, does not create practice targets, and does not affect mastery. Its result lists skills to revisit and is stored apart from the latest diagnostic ("Latest grade review" in Progress).
+
+The placement check (sampled, climbing from Kindergarten) remains available as an adult-started check for the initial level.
 
 ## Learning relationship
 

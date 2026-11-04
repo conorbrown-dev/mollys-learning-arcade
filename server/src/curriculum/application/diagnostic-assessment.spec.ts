@@ -3,6 +3,8 @@ import {
   advanceDiagnostic,
   buildDiagnosticReport,
   createDiagnosticBlueprint,
+  createGradeDiagnosticBlueprint,
+  diagnosticSessionLength,
   evaluateCurrentGrade,
   recordDiagnosticProbe,
   selectNextDiagnosticSkill,
@@ -107,5 +109,82 @@ describe("diagnostic learner simulation harness", () => {
     expect(report.totalItems).toBe(items);
     expect(report.criticalPrerequisiteGaps).toHaveLength(criticalGaps);
     expect(report.placementConfidence).toBe("HIGH");
+  });
+});
+
+describe("current-grade diagnostic", () => {
+  const standardsPerDomain = 3;
+  const standardTemplate = (grade: "K" | "1" | "2", domain: string, number: number): QuestionTemplate => ({ ...template(grade, domain), id: `${grade.toLowerCase()}.${domain.toLowerCase()}.${number}`, primaryStandardId: `${grade}.${domain}.${number}` });
+  const gradeTemplates = (["K", "1", "2"] as const).flatMap((grade) => domains.flatMap((domain) => Array.from({ length: standardsPerDomain }, (_unused, index) => standardTemplate(grade, domain, index + 1))));
+  const gradeTwoStandards = domains.flatMap((domain) => Array.from({ length: standardsPerDomain }, (_unused, index) => `2.${domain}.${index + 1}`));
+  const gradeBlueprint = () => createGradeDiagnosticBlueprint(gradeTemplates, "ELA", "Reading & Language", "2");
+
+  function runGradeDiagnostic(profile: (standardId: string, attempt: number) => boolean) {
+    let state = startDiagnostic(gradeBlueprint());
+    let item = 0;
+    while (!state.isComplete && item < 500) {
+      const skill = selectNextDiagnosticSkill(state);
+      if (!skill) { state = advanceDiagnostic(state); continue; }
+      const prior = state.probes.filter((probe) => probe.standardId === skill.standardId).length;
+      state = advanceDiagnostic(recordDiagnosticProbe(state, { standardId: skill.standardId, grade: "2", domain: skill.domain, templateId: skill.templateIds[0], questionInstanceId: `grade-${item}`, difficultyBand: 1, correct: profile(skill.standardId, prior), independent: true }));
+      item += 1;
+    }
+    return { state, report: buildDiagnosticReport(state) };
+  }
+
+  it("plans every standard in the chosen grade and nothing from other grades", () => {
+    const blueprint = gradeBlueprint();
+    expect(blueprint.grades).toHaveLength(1);
+    expect(blueprint.grades[0].grade).toBe("2");
+    expect(blueprint.coverage).toBe("complete");
+    expect(blueprint.grades[0].domains.flatMap((domain) => domain.skills.map((skill) => skill.standardId)).sort()).toEqual([...gradeTwoStandards].sort());
+  });
+
+  it("finishes a strong learner after one pass over the grade without moving to another grade", () => {
+    const { state, report } = runGradeDiagnostic(() => true);
+    expect(state.probes.every((probe) => probe.grade === "2")).toBe(true);
+    expect(report).toMatchObject({ instructionalGrade: "2", isGradeMastered: true, standardsAssessed: gradeTwoStandards.length, totalItems: gradeTwoStandards.length * 2, placementConfidence: "HIGH", needsReinforcement: [] });
+    expect(report.demonstratedStrengths.sort()).toEqual([...gradeTwoStandards].sort());
+  });
+
+  it("still checks every standard for a learner who misses everything and names the gaps", () => {
+    const { state, report } = runGradeDiagnostic(() => false);
+    expect(state.gradeResults).toHaveLength(1);
+    expect(report).toMatchObject({ instructionalGrade: "2", isGradeMastered: false, standardsAssessed: gradeTwoStandards.length });
+    expect([...report.needsReinforcement].sort()).toEqual([...gradeTwoStandards].sort());
+    expect(report.criticalPrerequisiteGaps).toEqual(expect.arrayContaining(["2.RF.1", "2.RF.2", "2.RF.3"]));
+  });
+
+  it("asks extra questions only for standards with an unclear answer pattern", () => {
+    const unclearStandard = "2.RI.2";
+    const { report } = runGradeDiagnostic((standardId, attempt) => standardId !== unclearStandard || [true, false, true, true][attempt]);
+    expect(report.totalItems).toBe(gradeTwoStandards.length * 2 + 2);
+    expect(report.demonstratedStrengths).toContain(unclearStandard);
+  });
+
+  it("reports a session length that never falls below the questions already answered", () => {
+    const blueprint = gradeBlueprint();
+    let state = startDiagnostic(blueprint);
+    expect(diagnosticSessionLength(state)).toBe(gradeTwoStandards.length * 2);
+    expect(blueprint.grades[0].maximumItems).toBe(gradeTwoStandards.length * 4);
+    for (let item = 0; !state.isComplete && item < 500; item += 1) {
+      const skill = selectNextDiagnosticSkill(state);
+      if (!skill) { state = advanceDiagnostic(state); continue; }
+      state = advanceDiagnostic(recordDiagnosticProbe(state, { standardId: skill.standardId, grade: "2", domain: skill.domain, templateId: skill.templateIds[0], questionInstanceId: `length-${item}`, difficultyBand: 1, correct: item % 3 !== 0, independent: true }));
+      expect(diagnosticSessionLength(state)).toBeGreaterThanOrEqual(state.probes.length);
+    }
+    expect(diagnosticSessionLength(state)).toBe(state.probes.length);
+  });
+
+  it("reports an honest error when the grade has no approved content", () => {
+    const onlyKindergarten = gradeTemplates.filter((item) => item.grade === "K");
+    expect(() => createGradeDiagnosticBlueprint(onlyKindergarten, "ELA", "Reading & Language", "1")).toThrow("Grade 1 Reading & Language diagnostic is not available");
+    expect(() => createGradeDiagnosticBlueprint(gradeTemplates, "ELA", "Reading & Language", "3")).toThrow("not part of the K–2 diagnostic");
+  });
+
+  it("leaves placement sampling a few standards per domain across all three grades", () => {
+    const placement = createDiagnosticBlueprint(gradeTemplates, "ELA", "Reading & Language", 7);
+    expect(placement.grades.map((grade) => grade.grade)).toEqual(["K", "1", "2"]);
+    expect(placement.grades.every((grade) => grade.domains.every((domain) => domain.skills.length === 2))).toBe(true);
   });
 });

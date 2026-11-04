@@ -1,7 +1,7 @@
 import { loadStudentSession, studentApi } from "../game/utils/studentSession";
 import type { CurriculumGrade, CurriculumSubject } from "../game/data/commonCoreQuizzes";
 
-export type LearningMode = "practice" | "diagnostic" | "placement" | "proctored" | "adultScored";
+export type LearningMode = "practice" | "diagnostic" | "placement" | "gradeReview" | "proctored" | "adultScored";
 export type LearningSubject = "ELA" | "MATH" | "SCIENCE" | "SOCIAL_STUDIES" | "HEALTH" | "PHYSICAL_EDUCATION" | "FINE_ARTS" | "COMPUTER_SCIENCE" | "INFORMATION_LITERACY";
 export type QuestionView = { schemaVersion: number; id: string; templateId: string; templateVersion: number; standardIds: string[]; responseType: string; prompt: { text: string; audioText: string | null; instructions: string | null }; interaction: { choices?: Array<{ id: string; label: string }>; visual?: { count: number; objectKey: string }; items?: string[]; categories?: string[]; adultChecklist?: string[]; learningTip?: string }; explanation: string; accessibility: { spokenPrompt: string | null; textAlternative: string } };
 export type LessonSupportLevel = "L0_REPLAY" | "L1_FOCUS" | "L2_CONTRAST" | "L3_PARTIAL" | "L4_MODEL";
@@ -34,6 +34,10 @@ export type PlacementResult = {
   grouping: string;
   grade: string;
   learningTargetIds: string[];
+  /** Absent on results saved before the current-grade diagnostic existed; those are shown as placements. */
+  assessmentKind?: "placement" | "diagnostic" | "gradeReview";
+  isGradeMastered?: boolean;
+  standardsAssessed?: number;
   placementConfidence?: "LOW" | "MODERATE" | "HIGH";
   evidenceCoverage?: number;
   totalItems?: number;
@@ -76,7 +80,7 @@ export type LessonPlanView = {
 };
 const key = "molly-curriculum-active-session-v4";
 type SavedLearningSession = { studentId: string; sessionId: string; position: number; length: number; mode?: LearningMode; subject?: LearningSubject };
-export type ResumableLearningSession = { session: SessionView; mode: "practice" | "diagnostic" | "placement"; subject?: LearningSubject };
+export type ResumableLearningSession = { session: SessionView; mode: "practice" | "diagnostic" | "placement" | "gradeReview"; subject?: LearningSubject };
 
 function authenticatedStudentId(): string {
   const session = loadStudentSession();
@@ -108,7 +112,7 @@ export const learningApplication = {
   async resumableSession(): Promise<ResumableLearningSession | null> {
     try {
       const saved = readSavedSession();
-      if (!saved || (saved.mode !== "practice" && saved.mode !== "diagnostic" && saved.mode !== "placement")) return null;
+      if (!saved || (saved.mode !== "practice" && saved.mode !== "diagnostic" && saved.mode !== "placement" && saved.mode !== "gradeReview")) return null;
       const session = await studentApi<SessionView>(`/curriculum/learning/sessions/${saved.sessionId}`);
       return { session, mode: saved.mode, subject: saved.subject };
     } catch { localStorage.removeItem(key); return null; }
@@ -121,5 +125,5 @@ export const learningApplication = {
   async completeActivity(sessionId: string, instanceId: string): Promise<{ complete: boolean }> { return studentApi<{ complete: boolean }>(`/curriculum/learning/sessions/${sessionId}/activities/${instanceId}/complete`, "POST"); },
   async hint(sessionId: string, instanceId: string, level?: LessonSupportLevel): Promise<HintResult> { return studentApi<HintResult>(`/curriculum/learning/sessions/${sessionId}/activities/${instanceId}/hints`, "POST", level ? { level } : {}); },
   async lessonPlans(): Promise<LessonPlanView[]> { authenticatedStudentId(); return studentApi<LessonPlanView[]>("/curriculum/learning/lesson-plans"); },
-  async progress() { authenticatedStudentId(); return studentApi<{ attempts: Array<{ sessionId: string; primaryStandardId: string; correct: boolean; usedHint: boolean; independent: boolean; purpose: string; submittedAnswer: unknown }>; mastery: Array<{ standardId: string; state: string; nextReviewAt: string | null }>; skillProgress: Array<{ skillId: string; skillName: string; domain: string; state: string }>; latestDiagnosticPlacement: PlacementResult | null; latestAssessmentSessionId: string | null }>("/curriculum/learning/progress"); }
+  async progress() { authenticatedStudentId(); return studentApi<{ attempts: Array<{ sessionId: string; primaryStandardId: string; correct: boolean; usedHint: boolean; independent: boolean; purpose: string; submittedAnswer: unknown }>; mastery: Array<{ standardId: string; state: string; nextReviewAt: string | null }>; skillProgress: Array<{ skillId: string; skillName: string; domain: string; state: string }>; latestDiagnosticPlacement: PlacementResult | null; latestGradeReview?: PlacementResult | null; latestAssessmentSessionId: string | null }>("/curriculum/learning/progress"); }
 };

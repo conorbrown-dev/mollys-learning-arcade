@@ -2,6 +2,19 @@ import { LearningFacadeService } from "./learning-facade.service";
 import { InMemoryProgressRepository } from "../infrastructure/in-memory-progress.repository";
 import { diagnosticQuestionFingerprint } from "./diagnostic-question-fingerprint";
 
+/** Answers every question of an adaptive assessment until it finishes, choosing each answer from the question's correct answer. */
+async function answerUntilComplete(service: LearningFacadeService, sessionId: string, answerFor: (correctAnswer: unknown) => unknown, limit = 400) {
+  const sessions = (service as unknown as { sessions: Map<string, { instance: { canonicalAnswer: unknown } }> }).sessions;
+  let result: Awaited<ReturnType<LearningFacadeService["submit"]>> | undefined;
+  let answered = 0;
+  while (!result?.complete && answered < limit) {
+    result = await service.submit(sessionId, answerFor(sessions.get(sessionId)!.instance.canonicalAnswer));
+    answered += 1;
+    if (!result.complete) await service.next(sessionId);
+  }
+  return { result, answered };
+}
+
 describe("LearningFacadeService", () => {
   it("serves only approved K content, hides answers, records one immutable attempt, and restores a session", async () => {
     const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository);
@@ -54,9 +67,10 @@ describe("LearningFacadeService", () => {
     expect(started.question.templateId).toMatch(/^1\./);
   });
 
-  it("starts a coverage-based diagnostic at Kindergarten", async () => {
+  it("starts a new-student placement at Kindergarten so it can search upward", async () => {
     const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
-    const started = await service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH");
+    await expect(service.start("grade-two", "placement", 42, "wrong-code", "2", "MATH")).rejects.toThrow("verification code");
+    const started = await service.start("grade-two", "placement", 42, "adult-code", "2", "MATH");
     expect(started).toMatchObject({ length: 30, assessmentStage: { grade: "K", number: 1, total: 3 } });
     const sessions = (service as unknown as { sessions: Map<string, { instance: { canonicalAnswer: unknown }; diagnostic: { probes: Array<{ grade: string }> } }> }).sessions;
     const stored = sessions.get(started.sessionId)!;
@@ -65,9 +79,9 @@ describe("LearningFacadeService", () => {
     expect(repository.sessions).toHaveLength(1);
   });
 
-  it("advances a consistently strong learner through K–2 and persists a detailed placement", async () => {
+  it("advances a consistently strong placement learner through K–2 and persists a detailed placement", async () => {
     const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
-    const started = await service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH");
+    const started = await service.start("grade-two", "placement", 42, "adult-code", "2", "MATH");
     const sessions = (service as unknown as { sessions: Map<string, { instance: { canonicalAnswer: unknown } }> }).sessions;
     let result: Awaited<ReturnType<typeof service.submit>> | undefined;
     let answered = 0;
@@ -84,9 +98,9 @@ describe("LearningFacadeService", () => {
     await expect(service.progressFor("grade-two")).resolves.toMatchObject({ latestDiagnosticPlacement: { grouping: "Math", grade: "2" }, latestAssessmentSessionId: started.sessionId });
   });
 
-  it("stops after covered foundational misses and returns remediation targets", async () => {
+  it("stops a placement after covered foundational misses and returns remediation targets", async () => {
     const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
-    const started = await service.start("needs-foundations", "diagnostic", 42, undefined, "2", "ELA");
+    const started = await service.start("needs-foundations", "placement", 42, "adult-code", "2", "ELA");
     let result: Awaited<ReturnType<typeof service.submit>> | undefined;
     for (let index = 0; index < 30 && !result?.complete; index += 1) {
       result = await service.submit(started.sessionId, "definitely incorrect");
@@ -97,6 +111,63 @@ describe("LearningFacadeService", () => {
     expect(result?.placement?.learningTargetIds.length).toBeGreaterThan(4);
     expect(result?.placement?.criticalPrerequisiteGaps.length).toBeGreaterThan(0);
     expect(repository.placements[0]?.learningTargetIds).toEqual(result?.placement?.learningTargetIds);
+  });
+
+  it("checks every skill in the student's current grade and never asks lower-grade questions", async () => {
+    const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
+    const started = await service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH");
+    expect(started).toMatchObject({ assessmentStage: { grade: "2", number: 1, total: 1 } });
+    expect(started.length).toBeGreaterThan(30);
+
+    const { result, answered } = await answerUntilComplete(service, started.sessionId, (correctAnswer) => correctAnswer);
+
+    const standardsAsked = new Set(repository.attempts.map((attempt) => attempt.primaryStandardId));
+    expect(repository.attempts.every((attempt) => attempt.purpose === "diagnostic" && attempt.primaryStandardId.startsWith("2."))).toBe(true);
+    expect(answered).toBe(started.length);
+    expect(result).toMatchObject({ complete: true, placement: { grouping: "Math", grade: "2", assessmentKind: "diagnostic", isGradeMastered: true, learningTargetIds: [] } });
+    expect(result?.placement?.standardsAssessed).toBe(standardsAsked.size);
+  });
+
+  it("keeps a struggling student inside the current grade and lists the skills to practice", async () => {
+    const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
+    const started = await service.start("needs-support", "diagnostic", 42, undefined, "2", "ELA");
+
+    const { result } = await answerUntilComplete(service, started.sessionId, () => "definitely incorrect");
+
+    expect(repository.attempts.every((attempt) => attempt.primaryStandardId.startsWith("2."))).toBe(true);
+    expect(result).toMatchObject({ complete: true, placement: { grouping: "Reading & Language", grade: "2", assessmentKind: "diagnostic", isGradeMastered: false } });
+    expect(result?.placement?.learningTargetIds.length).toBeGreaterThan(0);
+    expect(repository.targets.map((target) => target.standardId).sort()).toEqual([...(result?.placement?.learningTargetIds ?? [])].sort());
+  });
+
+  it("runs a lower-grade review only when an adult asks, without moving the student or their practice queue", async () => {
+    const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
+    await expect(service.start("grade-two", "gradeReview", 42, undefined, "1", "MATH")).rejects.toThrow("verification code");
+    await expect(service.start("grade-two", "gradeReview", 42, "wrong-code", "1", "MATH")).rejects.toThrow("verification code");
+    await expect(service.start("grade-two", "gradeReview", 42, "adult-code", "1", "SCIENCE")).rejects.toThrow("Reading & Language or Math");
+
+    const started = await service.start("grade-two", "gradeReview", 42, "adult-code", "1", "MATH");
+    expect(started).toMatchObject({ assessmentStage: { grade: "1", number: 1, total: 1 } });
+    const { result } = await answerUntilComplete(service, started.sessionId, () => "definitely incorrect");
+
+    expect(repository.attempts.every((attempt) => attempt.purpose === "gradeReview" && attempt.primaryStandardId.startsWith("1."))).toBe(true);
+    expect(result).toMatchObject({ complete: true, placement: { grouping: "Math", grade: "1", assessmentKind: "gradeReview", isGradeMastered: false } });
+    expect(result?.placement?.learningTargetIds.length).toBeGreaterThan(0);
+    expect(repository.targets).toHaveLength(0);
+    expect(repository.mastery.every((record) => record.scoredAttemptCount === 0)).toBe(true);
+  });
+
+  it("keeps a grade review separate from the student's latest diagnostic", async () => {
+    const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
+    const diagnostic = await service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH");
+    await answerUntilComplete(service, diagnostic.sessionId, (correctAnswer) => correctAnswer);
+    const review = await service.start("grade-two", "gradeReview", 43, "adult-code", "K", "MATH");
+    await answerUntilComplete(service, review.sessionId, (correctAnswer) => correctAnswer);
+
+    const progress = await service.progressFor("grade-two");
+    expect(progress.latestDiagnosticPlacement).toMatchObject({ grade: "2", assessmentKind: "diagnostic" });
+    expect(progress.latestGradeReview).toMatchObject({ grade: "K", assessmentKind: "gradeReview" });
+    expect(progress.latestAssessmentSessionId).toBe(diagnostic.sessionId);
   });
 
   it("resumes a diagnostic after a service restart with the same evidence and question", async () => {
@@ -118,7 +189,8 @@ describe("LearningFacadeService", () => {
     const sessions = (service as unknown as { sessions: Map<string, { instance: Parameters<typeof diagnosticQuestionFingerprint>[0] }> }).sessions;
     const fingerprints = new Set<string>();
 
-    for (let index = 0; index < 40; index += 1) {
+    // A current-grade diagnostic covers every Grade 2 standard, so it needs far more than 40 answers to finish.
+    for (let index = 0; index < 400; index += 1) {
       const instance = sessions.get(started.sessionId)!.instance;
       const fingerprint = diagnosticQuestionFingerprint(instance);
       expect(fingerprints.has(fingerprint)).toBe(false);

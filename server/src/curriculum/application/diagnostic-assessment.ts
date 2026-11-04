@@ -4,6 +4,12 @@ export const DIAGNOSTIC_EVIDENCE_STATUSES = ["UNASSESSED", "INSUFFICIENT_EVIDENC
 export type DiagnosticEvidenceStatus = (typeof DIAGNOSTIC_EVIDENCE_STATUSES)[number];
 export type PlacementConfidence = "LOW" | "MODERATE" | "HIGH";
 
+/**
+ * "sampled" checks a few standards per domain (used by placement, which has to
+ * search across grades quickly). "complete" checks every standard in the grade.
+ */
+export type DiagnosticCoverage = "sampled" | "complete";
+
 export interface DiagnosticPolicy {
   minimumEvidence: number;
   maximumEvidence: number;
@@ -12,6 +18,8 @@ export interface DiagnosticPolicy {
   domainMasteryThreshold: number;
   gradeMasteryThreshold: number;
   maximumItemsPerGrade: number;
+  /** Defaults to "sampled". With "complete", requiredStandardsPerDomain and maximumItemsPerGrade are ignored. */
+  coverage?: DiagnosticCoverage;
 }
 
 export const defaultDiagnosticPolicy: DiagnosticPolicy = {
@@ -22,6 +30,24 @@ export const defaultDiagnosticPolicy: DiagnosticPolicy = {
   domainMasteryThreshold: 0.5,
   gradeMasteryThreshold: 0.75,
   maximumItemsPerGrade: 30
+};
+
+/**
+ * Policy for the current-grade diagnostic and the parent-triggered grade review.
+ * Every standard in the grade is checked, so a domain counts as secure only when
+ * most of its standards are, instead of half of two sampled ones. Per-standard
+ * evidence stays at 2–4 because most standards have only two or three distinct
+ * generated questions.
+ */
+export const gradeDiagnosticPolicy: DiagnosticPolicy = {
+  minimumEvidence: 2,
+  maximumEvidence: 4,
+  masteryThreshold: 0.75,
+  requiredStandardsPerDomain: Number.POSITIVE_INFINITY,
+  domainMasteryThreshold: 0.75,
+  gradeMasteryThreshold: 0.75,
+  maximumItemsPerGrade: Number.POSITIVE_INFINITY,
+  coverage: "complete"
 };
 
 export interface DiagnosticSkillRequirement {
@@ -54,6 +80,8 @@ export interface DiagnosticBlueprint {
   subject: "ELA" | "MATH";
   grouping: string;
   grades: DiagnosticGradeBlueprint[];
+  /** Absent on sessions saved before complete-coverage diagnostics existed; treated as "sampled". */
+  coverage?: DiagnosticCoverage;
 }
 
 export interface DiagnosticProbe {
@@ -123,6 +151,12 @@ export interface DiagnosticReport {
   placementConfidence: PlacementConfidence;
   evidenceCoverage: number;
   totalItems: number;
+  /** Set by the facade when the report is stored, so a grade review is never mistaken for the student's real diagnostic. Absent on older reports. */
+  assessmentKind?: "placement" | "diagnostic" | "gradeReview";
+  /** Number of distinct standards that were checked. */
+  standardsAssessed: number;
+  /** True when the final grade that was checked met every mastery rule. */
+  isGradeMastered: boolean;
   demonstratedStrengths: string[];
   needsReinforcement: string[];
   criticalPrerequisiteGaps: string[];
@@ -145,6 +179,54 @@ const rotate = <T>(items: T[], offset: number): T[] => items.length < 2 ? items 
 const domainOf = (standardId: string): string => standardId.split(".")[1] ?? standardId;
 const isMastery = (status: DiagnosticEvidenceStatus): boolean => status === "MASTERED" || status === "STRONG_MASTERY";
 
+function buildGradeBlueprint(
+  templates: QuestionTemplate[],
+  subject: DiagnosticBlueprint["subject"],
+  grade: string,
+  gradeIndex: number,
+  seed: number,
+  policy: DiagnosticPolicy
+): DiagnosticGradeBlueprint {
+  const isComplete = policy.coverage === "complete";
+  const byDomain = new Map<string, QuestionTemplate[]>();
+  for (const template of templates.filter((item) => item.grade === grade)) {
+    const domain = domainOf(template.primaryStandardId);
+    byDomain.set(domain, [...(byDomain.get(domain) ?? []), template]);
+  }
+  const domains = [...byDomain.keys()].sort().map((domain, domainIndex): DiagnosticDomainRequirement => {
+    const domainTemplates = byDomain.get(domain) ?? [];
+    const byStandard = new Map<string, QuestionTemplate[]>();
+    for (const template of domainTemplates) byStandard.set(template.primaryStandardId, [...(byStandard.get(template.primaryStandardId) ?? []), template]);
+    const sortedIds = [...byStandard.keys()].sort();
+    const selectedIds = isComplete
+      ? sortedIds
+      : rotate(sortedIds, Math.abs(seed + gradeIndex * 17 + domainIndex * 31)).slice(0, Math.min(policy.requiredStandardsPerDomain, sortedIds.length));
+    const isCritical = criticalDomains[subject][grade]?.includes(domain) ?? false;
+    return {
+      domain,
+      label: domainLabels[domain] ?? domain,
+      isCritical,
+      weight: 1,
+      masteryThreshold: isCritical ? 1 : policy.domainMasteryThreshold,
+      skills: selectedIds.map((standardId) => ({
+        standardId,
+        domain,
+        templateIds: (byStandard.get(standardId) ?? []).map((template) => template.id).sort(),
+        minimumEvidence: policy.minimumEvidence,
+        maximumEvidence: policy.maximumEvidence,
+        masteryThreshold: policy.masteryThreshold,
+        isCritical
+      }))
+    };
+  });
+  // Complete coverage has no fixed cap: the ceiling is every standard asked its maximum number of times.
+  const maximumItems = isComplete
+    ? domains.reduce((sum, domain) => sum + domain.skills.reduce((skillSum, skill) => skillSum + skill.maximumEvidence, 0), 0)
+    : policy.maximumItemsPerGrade;
+  return { grade, domains, maximumItems, masteryThreshold: policy.gradeMasteryThreshold };
+}
+
+/** Placement: samples a few standards per domain and climbs Kindergarten → Grade 2 until a grade is not secure. */
 export function createDiagnosticBlueprint(
   templates: QuestionTemplate[],
   subject: DiagnosticBlueprint["subject"],
@@ -152,41 +234,27 @@ export function createDiagnosticBlueprint(
   seed: number,
   policy: DiagnosticPolicy = defaultDiagnosticPolicy
 ): DiagnosticBlueprint {
-  const grades = gradeOrder.map((grade, gradeIndex) => {
-    const gradeTemplates = templates.filter((template) => template.grade === grade);
-    const byDomain = new Map<string, QuestionTemplate[]>();
-    for (const template of gradeTemplates) {
-      const domain = domainOf(template.primaryStandardId);
-      byDomain.set(domain, [...(byDomain.get(domain) ?? []), template]);
-    }
-    const domains = [...byDomain.keys()].sort().map((domain, domainIndex): DiagnosticDomainRequirement => {
-      const domainTemplates = byDomain.get(domain) ?? [];
-      const byStandard = new Map<string, QuestionTemplate[]>();
-      for (const template of domainTemplates) byStandard.set(template.primaryStandardId, [...(byStandard.get(template.primaryStandardId) ?? []), template]);
-      const standardIds = rotate([...byStandard.keys()].sort(), Math.abs(seed + gradeIndex * 17 + domainIndex * 31));
-      const selectedIds = standardIds.slice(0, Math.min(policy.requiredStandardsPerDomain, standardIds.length));
-      const isCritical = criticalDomains[subject][grade]?.includes(domain) ?? false;
-      return {
-        domain,
-        label: domainLabels[domain] ?? domain,
-        isCritical,
-        weight: 1,
-        masteryThreshold: isCritical ? 1 : policy.domainMasteryThreshold,
-        skills: selectedIds.map((standardId) => ({
-          standardId,
-          domain,
-          templateIds: (byStandard.get(standardId) ?? []).map((template) => template.id).sort(),
-          minimumEvidence: policy.minimumEvidence,
-          maximumEvidence: policy.maximumEvidence,
-          masteryThreshold: policy.masteryThreshold,
-          isCritical
-        }))
-      };
-    });
-    return { grade, domains, maximumItems: policy.maximumItemsPerGrade, masteryThreshold: policy.gradeMasteryThreshold };
-  });
+  const grades = gradeOrder.map((grade, gradeIndex) => buildGradeBlueprint(templates, subject, grade, gradeIndex, seed, policy));
   if (grades.some((grade) => grade.domains.length === 0)) throw new Error(`A complete K–2 ${grouping} diagnostic is not available yet.`);
-  return { subject, grouping, grades };
+  return { subject, grouping, grades, coverage: policy.coverage ?? "sampled" };
+}
+
+/**
+ * Current-grade diagnostic and grade review: checks every standard in one grade
+ * and never moves to another grade. Lower-grade material is only ever assessed
+ * when an adult asks for a review of that grade.
+ */
+export function createGradeDiagnosticBlueprint(
+  templates: QuestionTemplate[],
+  subject: DiagnosticBlueprint["subject"],
+  grouping: string,
+  grade: string,
+  policy: DiagnosticPolicy = gradeDiagnosticPolicy
+): DiagnosticBlueprint {
+  if (!gradeOrder.includes(grade)) throw new Error(`Grade ${grade} is not part of the K–2 diagnostic.`);
+  const gradeBlueprint = buildGradeBlueprint(templates, subject, grade, gradeOrder.indexOf(grade), 0, policy);
+  if (gradeBlueprint.domains.length === 0) throw new Error(`A complete ${grade === "K" ? "Kindergarten" : `Grade ${grade}`} ${grouping} diagnostic is not available yet.`);
+  return { subject, grouping, grades: [gradeBlueprint], coverage: policy.coverage ?? "complete" };
 }
 
 export function startDiagnostic(blueprint: DiagnosticBlueprint): DiagnosticState {
@@ -244,6 +312,26 @@ export function selectNextDiagnosticSkill(state: DiagnosticState): DiagnosticSki
     if (skill) return skill;
   }
   return skills.find((skill) => evidenceForSkill(state, skill, grade.grade).status === "INSUFFICIENT_EVIDENCE" && evidenceForSkill(state, skill, grade.grade).attemptCount < skill.maximumEvidence) ?? null;
+}
+
+/**
+ * The total shown to the student ("12 / 90 completed").
+ *
+ * A complete-coverage diagnostic can ask up to four times as many questions as it
+ * needs in the common case, so the ceiling would badly overstate the length.
+ * Instead this is what has been answered plus the least that must still be asked;
+ * it only grows when an unclear answer pattern earns a skill extra questions.
+ */
+export function diagnosticSessionLength(state: DiagnosticState): number {
+  const grade = state.blueprint.grades[state.gradeIndex];
+  if (state.blueprint.coverage !== "complete") return grade.maximumItems;
+  const unavailable = new Set(state.unavailableSkillIds ?? []);
+  const answered = state.probes.filter((probe) => probe.grade === grade.grade).length;
+  const stillRequired = grade.domains
+    .flatMap((domain) => domain.skills)
+    .filter((skill) => !unavailable.has(skill.standardId))
+    .reduce((sum, skill) => sum + Math.max(0, skill.minimumEvidence - evidenceForSkill(state, skill, grade.grade).attemptCount), 0);
+  return answered + stillRequired;
 }
 
 export function markDiagnosticSkillUnavailable(state: DiagnosticState, standardId: string): DiagnosticState {
@@ -321,6 +409,8 @@ export function buildDiagnosticReport(state: DiagnosticState): DiagnosticReport 
     placementConfidence: confidence,
     evidenceCoverage: state.gradeResults.reduce((sum, grade) => sum + grade.coverage, 0) / state.gradeResults.length,
     totalItems: state.probes.length,
+    standardsAssessed: unique(evidence.map((item) => item.standardId)).length,
+    isGradeMastered: terminal.isMastered,
     demonstratedStrengths: unique(evidence.filter((item) => isMastery(item.status)).map((item) => item.standardId)),
     needsReinforcement: unique(evidence.filter((item) => item.status === "EMERGING" || item.status === "DEVELOPING").map((item) => item.standardId)),
     criticalPrerequisiteGaps: unique(state.gradeResults.flatMap((grade) => grade.criticalGapIds)),

@@ -13,6 +13,8 @@ import {
   advanceDiagnostic,
   buildDiagnosticReport,
   createDiagnosticBlueprint,
+  createGradeDiagnosticBlueprint,
+  diagnosticSessionLength,
   evidenceForSkill,
   markDiagnosticSkillUnavailable,
   recordDiagnosticProbe,
@@ -30,7 +32,7 @@ import type { LessonCatalog } from "../domain/lesson-catalog";
 import type { MisconceptionTag, SupportLevel } from "../domain/learning-activity";
 import type { EvidenceMode, SkillProgressState } from "../domain/ela-skill";
 
-type SessionPurpose = "practice" | "review" | "diagnostic" | "placement" | "proctored" | "adultScored";
+type SessionPurpose = "practice" | "review" | "diagnostic" | "placement" | "gradeReview" | "proctored" | "adultScored";
 type LearningSubject = "ELA" | "MATH" | "SCIENCE" | "SOCIAL_STUDIES" | "HEALTH" | "PHYSICAL_EDUCATION" | "FINE_ARTS" | "COMPUTER_SCIENCE" | "INFORMATION_LITERACY";
 type StoredSession = {
   id: string; learnerId: string; purpose: SessionPurpose; grade: string; diagnosticGrouping: string; seed: number; position: number; length: number;
@@ -65,7 +67,10 @@ export const KINDERGARTEN_ELA_AUDIO_READY = Symbol("KINDERGARTEN_ELA_AUDIO_READY
 const seedAt = (seed: number, position: number) => Math.abs(Math.imul(seed ^ (position + 1), 2654435761)) >>> 0;
 const subjectName = (subject: LearningSubject | undefined) => subject === "ELA" ? "Reading & Language" : subject === "MATH" ? "Math" : subject?.split("_").map((word) => `${word[0]}${word.slice(1).toLowerCase()}`).join(" ") ?? "Learning";
 const catalogSubject = (subject: LearningSubject | undefined) => subject === "SOCIAL_STUDIES" ? "socialStudies" : subject === "PHYSICAL_EDUCATION" ? "physicalEducation" : subject === "FINE_ARTS" ? "fineArts" : subject === "COMPUTER_SCIENCE" ? "computerScience" : subject === "INFORMATION_LITERACY" ? "informationLiteracy" : subject?.toLowerCase();
-const isAdaptiveAssessment = (purpose: SessionPurpose) => purpose === "diagnostic" || purpose === "placement";
+const isAdaptiveAssessment = (purpose: SessionPurpose) => purpose === "diagnostic" || purpose === "placement" || purpose === "gradeReview";
+/** The current-grade check and the manual grade review stay inside one grade; only placement climbs across grades. */
+const isSingleGradeAssessment = (purpose: SessionPurpose) => purpose === "diagnostic" || purpose === "gradeReview";
+const requiresAdultCode = (purpose: SessionPurpose) => purpose === "proctored" || purpose === "adultScored" || purpose === "placement" || purpose === "gradeReview";
 const catalogStandardsForSkill = (skillId: string) => lessonCatalogSkill(skillId).standardMappings.map((mapping) => mapping.standardId);
 
 @Injectable()
@@ -106,8 +111,8 @@ export class LearningFacadeService {
   }
 
   async start(learnerId: string, purpose: SessionPurpose, seed = Math.floor(Math.random() * 2_147_483_647), submittedProctorCode?: string, grade = "K", subject?: LearningSubject) {
-    if ((purpose === "proctored" || purpose === "adultScored" || purpose === "placement") && (!this.proctorCode || submittedProctorCode !== this.proctorCode)) throw new ForbiddenException("A parent or teacher verification code is required to start a proctored assessment.");
-    if (isAdaptiveAssessment(purpose) && subject !== "ELA" && subject !== "MATH") throw new ForbiddenException("Choose Reading & Language or Math before starting a diagnostic or placement check.");
+    if (requiresAdultCode(purpose) && (!this.proctorCode || submittedProctorCode !== this.proctorCode)) throw new ForbiddenException("A parent or teacher verification code is required to start a proctored assessment.");
+    if (isAdaptiveAssessment(purpose) && subject !== "ELA" && subject !== "MATH") throw new ForbiddenException("Choose Reading & Language or Math before starting a diagnostic, placement check, or grade review.");
     const lessonCatalog = purpose === "practice" ? this.practiceLessonCatalog(grade, subject) : undefined;
     if (lessonCatalog) return this.startLessonSession(learnerId, seed, lessonCatalog);
     await validateK2ContentCatalog();
@@ -115,14 +120,18 @@ export class LearningFacadeService {
     const subjectFilter = catalogSubject(subject);
     const approved = allTemplates.filter((template) => template.review.status === "reviewed" && (!subjectFilter || template.subject === subjectFilter));
     const templates = approved.filter((template) => template.grade === grade && (purpose === "adultScored" ? template.generator.kind.endsWith("Adult") : !template.generator.kind.endsWith("Adult")));
-    const diagnosticTemplates = isAdaptiveAssessment(purpose) ? approved.filter((template) => template.diagnosticEligible && !template.generator.kind.endsWith("Adult")) : [];
+    const diagnosticTemplates = isAdaptiveAssessment(purpose)
+      ? approved.filter((template) => template.diagnosticEligible && !template.generator.kind.endsWith("Adult") && (!isSingleGradeAssessment(purpose) || template.grade === grade))
+      : [];
     const availableTemplates = isAdaptiveAssessment(purpose) ? diagnosticTemplates : templates;
     if (!availableTemplates.length) throw new Error(`No approved ${subject ?? ""} Grade ${grade === "K" ? "Kindergarten" : grade} content is available.`);
     await this.progress.markDue(learnerId);
     const mastery = await this.repository.listMastery(learnerId);
     const activeTemplates = isAdaptiveAssessment(purpose) ? availableTemplates : purpose === "practice" ? selectNextLearningTemplates(templates, mastery) : purpose === "adultScored" ? selectNextLearningTemplates(templates, mastery, 1) : templates;
     if (!activeTemplates.length) throw new Error("All skills are mastered for now. Return when a scheduled review is due.");
-    const diagnostic = isAdaptiveAssessment(purpose) ? startDiagnostic(createDiagnosticBlueprint(activeTemplates, subject as "ELA" | "MATH", subjectName(subject), seed)) : undefined;
+    const diagnostic = isAdaptiveAssessment(purpose) ? startDiagnostic(isSingleGradeAssessment(purpose)
+      ? createGradeDiagnosticBlueprint(activeTemplates, subject as "ELA" | "MATH", subjectName(subject), grade)
+      : createDiagnosticBlueprint(activeTemplates, subject as "ELA" | "MATH", subjectName(subject), seed)) : undefined;
     const selected = diagnostic ? this.requireDiagnosticTemplate(diagnostic, activeTemplates) : activeTemplates[seedAt(seed, 0) % activeTemplates.length];
     const sessionPurpose: SessionPurpose = purpose === "practice" && mastery.some((record) => record.standardId === selected.primaryStandardId && record.state === "reviewDue") ? "review" : purpose;
     const sessionTemplates = purpose === "proctored" ? templates.filter((template) => template.primaryStandardId === selected.primaryStandardId) : activeTemplates;
@@ -130,7 +139,7 @@ export class LearningFacadeService {
     const instance = generateQuestion(selected, seedAt(seed, 0));
     const session: StoredSession = {
       id: randomUUID(), learnerId, purpose: sessionPurpose, grade: selected.grade, diagnosticGrouping: subjectName(subject), seed, position: 0,
-      length: diagnostic ? diagnostic.blueprint.grades[0].maximumItems : purpose === "adultScored" ? 1 : purpose === "proctored" ? 5 : 10,
+      length: diagnostic ? diagnosticSessionLength(diagnostic) : purpose === "adultScored" ? 1 : purpose === "proctored" ? 5 : 10,
       templates: sessionTemplates, instance, submittedInstanceIds: new Set<string>(), diagnosticQuestionFingerprints: new Set(diagnostic ? [diagnosticQuestionFingerprint(instance)] : []), proctoredCorrect: 0,
       diagnostic, createdAt: now, status: "active"
     };
@@ -357,7 +366,7 @@ export class LearningFacadeService {
         }
         session.grade = session.templates.find((template) => template.id === question.templateId)?.grade ?? previousGrade;
         session.position = previousGrade === session.grade ? session.position + 1 : 0;
-        session.length = session.diagnostic.blueprint.grades[session.diagnostic.gradeIndex].maximumItems;
+        session.length = diagnosticSessionLength(session.diagnostic);
         session.instance = question;
         session.diagnosticQuestionFingerprints.add(diagnosticQuestionFingerprint(question));
         await this.checkpoint(session);
@@ -409,7 +418,11 @@ export class LearningFacadeService {
   async progressFor(learnerId: string) {
     const [attempts, mastery, placements, skillProgress] = await Promise.all([this.repository.listAttempts(learnerId), this.repository.listMastery(learnerId), this.repository.listDiagnosticPlacements(learnerId), this.repository.listSkillProgress(learnerId)]);
     const latestAssessment = attempts.filter((attempt) => attempt.purpose === "diagnostic" || attempt.purpose === "placement").sort((left, right) => right.attemptedAt.getTime() - left.attemptedAt.getTime())[0];
-    return { attempts, mastery, skillProgress: skillProgress.map((record) => ({ ...record, skillName: lessonCatalogSkill(record.skillId).name, domain: lessonCatalogSkill(record.skillId).domain })), latestDiagnosticPlacement: placements[0] ? this.placementView(placements[0]) : null, latestAssessmentSessionId: latestAssessment?.sessionId ?? null };
+    const newestFirst = [...placements].sort((left, right) => right.completedAt.getTime() - left.completedAt.getTime());
+    const isGradeReview = (placement: DiagnosticPlacement) => placement.report.assessmentKind === "gradeReview";
+    const latestPlacement = newestFirst.find((placement) => !isGradeReview(placement));
+    const latestReview = newestFirst.find(isGradeReview);
+    return { attempts, mastery, skillProgress: skillProgress.map((record) => ({ ...record, skillName: lessonCatalogSkill(record.skillId).name, domain: lessonCatalogSkill(record.skillId).domain })), latestDiagnosticPlacement: latestPlacement ? this.placementView(latestPlacement) : null, latestGradeReview: latestReview ? this.placementView(latestReview) : null, latestAssessmentSessionId: latestAssessment?.sessionId ?? null };
   }
 
   async lessonPlans() { return loadProductionLessonPlans(); }
@@ -448,9 +461,10 @@ export class LearningFacadeService {
     const learningTargetIds = [...new Set([...report.needsReinforcement, ...report.criticalPrerequisiteGaps, ...report.unresolvedSkills])];
     const placement: DiagnosticPlacement = {
       learnerId: session.learnerId, grouping: report.grouping, grade: report.instructionalGrade, learningTargetIds,
-      report: report as unknown as Record<string, unknown>, completedAt: new Date()
+      report: { ...report, assessmentKind: session.purpose } as unknown as Record<string, unknown>, completedAt: new Date()
     };
-    await Promise.all(learningTargetIds.map((standardId) => this.repository.saveLearningTarget({ learnerId: session.learnerId, standardId, active: true })));
+    // A grade review is a one-off look at earlier material. It lists the skills to revisit but never changes what the student practices.
+    if (session.purpose !== "gradeReview") await Promise.all(learningTargetIds.map((standardId) => this.repository.saveLearningTarget({ learnerId: session.learnerId, standardId, active: true })));
     await this.repository.saveDiagnosticPlacement(placement);
     session.assessmentResult = placement;
     session.status = "completed";

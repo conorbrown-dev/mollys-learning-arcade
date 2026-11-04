@@ -48,6 +48,7 @@ type Progress = {
     state: string;
   }>;
   latestDiagnosticPlacement: PlacementResult | null;
+  latestGradeReview?: PlacementResult | null;
   latestAssessmentSessionId: string | null;
 };
 type Classification = Record<string, string>;
@@ -207,9 +208,24 @@ type LearningPurpose =
   | "practice"
   | "diagnostic"
   | "placement"
+  | "gradeReview"
   | "proctored"
   | "adultScored";
 type LearningLevel = "K" | "GRADE_1" | "GRADE_2";
+type ReviewGrade = "K" | "1" | "2";
+
+const REVIEW_GRADES: ReadonlyArray<{ value: ReviewGrade; label: string }> = [
+  { value: "K", label: "Kindergarten" },
+  { value: "1", label: "Grade 1" },
+  { value: "2", label: "Grade 2" },
+];
+
+function learningPath(purpose: LearningPurpose): string {
+  if (purpose === "adultScored") return "/learning/adult-scored";
+  return purpose === "gradeReview"
+    ? "/learning/grade-review"
+    : `/learning/${purpose}`;
+}
 
 function gradeName(grade: string | undefined): string {
   if (grade === "GRADE_2") return "Grade 2";
@@ -261,33 +277,59 @@ function PlacementSummary({
   placement: PlacementResult;
   title: string;
 }): JSX.Element {
+  const isReview = placement.assessmentKind === "gradeReview";
+  const isGradeCheck = isReview || placement.assessmentKind === "diagnostic";
+  const secureSkills = placement.demonstratedStrengths?.length;
+  const targetCount = placement.learningTargetIds.length;
   return (
     <section className="level-panel my-5 rounded-2xl p-5" aria-live="polite">
       <p className="learning-step text-xs font-black tracking-[.16em]">
         {title.toUpperCase()}
       </p>
       <h2 className="!mb-2 !mt-1 !text-2xl">{placement.grouping}</h2>
-      <p>
-        Recommended starting level:{" "}
-        <strong>{placementGradeName(placement.grade)}</strong>
-      </p>
+      {isGradeCheck ? (
+        <p>
+          <strong>{placementGradeName(placement.grade)}</strong>
+          {typeof placement.standardsAssessed === "number" &&
+          typeof secureSkills === "number"
+            ? ` · ${secureSkills} of ${placement.standardsAssessed} skills secure`
+            : ""}
+        </p>
+      ) : (
+        <p>
+          Recommended starting level:{" "}
+          <strong>{placementGradeName(placement.grade)}</strong>
+        </p>
+      )}
       {placement.placementConfidence && (
         <p>
-          Placement confidence:{" "}
+          {isGradeCheck ? "Evidence confidence" : "Placement confidence"}:{" "}
           <strong>{placement.placementConfidence.toLowerCase()}</strong>
           {typeof placement.totalItems === "number"
             ? ` · ${placement.totalItems} learning checks`
             : ""}
         </p>
       )}
+      {isReview && (
+        <p>
+          This review does not change the student&apos;s level or practice
+          plan.
+        </p>
+      )}
       <p>
-        {placement.learningTargetIds.length > 0
-          ? `${placement.learningTargetIds.length} skill ${placement.learningTargetIds.length === 1 ? "area is" : "areas are"} ready for focused practice.`
-          : "No priority gaps were found in this check. Regular practice will build and confirm mastery."}
+        {isReview
+          ? targetCount > 0
+            ? `${targetCount} skill ${targetCount === 1 ? "area" : "areas"} to revisit.`
+            : "No gaps were found in this review."
+          : targetCount > 0
+            ? `${targetCount} skill ${targetCount === 1 ? "area is" : "areas are"} ready for focused practice.`
+            : "No priority gaps were found in this check. Regular practice will build and confirm mastery."}
       </p>
-      {placement.learningTargetIds.length > 0 && (
+      {targetCount > 0 && (
         <details className="mt-3">
-          <summary>See skills to practice</summary>
+          <summary>
+            {isReview ? "See skills to revisit" : "See skills to practice"}
+          </summary>
           <ul className="mt-2 list-disc pl-6">
             {placement.learningTargetIds.map((standardId) => (
               <li key={standardId}>{standardId}</li>
@@ -297,12 +339,16 @@ function PlacementSummary({
       )}
       {placement.strandPlacements && placement.strandPlacements.length > 0 && (
         <details className="mt-3">
-          <summary>See skill-area placement</summary>
+          <summary>
+            {isGradeCheck ? "See skill-area results" : "See skill-area placement"}
+          </summary>
           <ul className="mt-2 list-disc pl-6">
             {placement.strandPlacements.map((strand) => (
               <li key={strand.domain}>
                 <strong>{strand.label}:</strong>{" "}
-                {placementGradeName(strand.instructionalGrade)} ·{" "}
+                {isGradeCheck
+                  ? ""
+                  : `${placementGradeName(strand.instructionalGrade)} · `}
                 {strand.status === "ready"
                   ? "ready"
                   : strand.status === "unresolved"
@@ -612,6 +658,8 @@ function LearningDashboard({
   setProctorCode,
   placementGrade,
   setPlacementGrade,
+  reviewGrade,
+  setReviewGrade,
   resumableAssessment,
   resumeAssessment,
   start,
@@ -628,9 +676,11 @@ function LearningDashboard({
   setProctorCode: (code: string) => void;
   placementGrade: LearningLevel;
   setPlacementGrade: (grade: LearningLevel) => void;
+  reviewGrade: ReviewGrade;
+  setReviewGrade: (grade: ReviewGrade) => void;
   resumableAssessment: ResumableLearningSession | null;
   resumeAssessment: () => void;
-  start: (purpose: LearningPurpose) => Promise<void>;
+  start: (purpose: LearningPurpose, gradeOverride?: ReviewGrade) => Promise<void>;
   updatePlacement: () => Promise<void>;
   lessonPlan: LessonPlanView | null;
   openLesson: (lessonPlanId: string) => void;
@@ -645,6 +695,17 @@ function LearningDashboard({
     selectedSubject,
     learningGrade(selectedLevel),
   );
+  const currentGradeIndex = REVIEW_GRADES.findIndex(
+    (grade) => grade.value === learningGrade(selectedLevel),
+  );
+  const earlierGrades = REVIEW_GRADES.slice(0, Math.max(currentGradeIndex, 0));
+  const supportsGradeReview =
+    selectedSubject === "ELA" || selectedSubject === "MATH";
+  const effectiveReviewGrade = earlierGrades.some(
+    (grade) => grade.value === reviewGrade,
+  )
+    ? reviewGrade
+    : (earlierGrades[earlierGrades.length - 1]?.value ?? reviewGrade);
   const savedActivityName =
     resumableAssessment?.mode === "practice" ? "lesson" : "learning check";
   const resumeName =
@@ -652,7 +713,9 @@ function LearningDashboard({
       ? "lesson"
       : resumableAssessment?.mode === "placement"
         ? "placement"
-        : "diagnostic";
+        : resumableAssessment?.mode === "gradeReview"
+          ? "review"
+          : "diagnostic";
 
   return (
     <section className="learning-dashboard">
@@ -765,10 +828,11 @@ function LearningDashboard({
                 </button>
               </div>
               <p className="session-note">
-                The learning check starts with Kindergarten skills and adapts
-                through Grade 2. It checks each important skill area more than
-                once and asks a few more activities when an answer pattern is
-                unclear. You can take a break and continue later.
+                The diagnostic checks every skill in {gradeName(selectedLevel)}
+                and never goes back to earlier grades. It asks about each skill
+                at least twice, with a few more activities when an answer
+                pattern is unclear. It is a long check, so take breaks and
+                continue later.
               </p>
             </>
           )}
@@ -817,7 +881,7 @@ function LearningDashboard({
             <span>
               <span className="tools-title">Parent &amp; teacher tools</span>
               <span className="tools-subtitle">
-                Placement, proctored checks, and levels
+                Placement, reviews, proctored checks, and levels
               </span>
             </span>
           </summary>
@@ -863,6 +927,47 @@ function LearningDashboard({
                 {subject.adultActivity}
               </button>
             </div>
+            {supportsGradeReview && (
+              <div className="level-panel">
+                <h3>Review earlier grade material</h3>
+                <p className="learning-card-note">
+                  A one-time check of an earlier grade in {subject.label}. It
+                  does not change the student&apos;s level or practice plan.
+                </p>
+                {earlierGrades.length > 0 ? (
+                  <div className="level-row">
+                    <label>
+                      Grade to review
+                      <select
+                        value={effectiveReviewGrade}
+                        onChange={(event) =>
+                          setReviewGrade(event.target.value as ReviewGrade)
+                        }
+                      >
+                        {earlierGrades.map((grade) => (
+                          <option key={grade.value} value={grade.value}>
+                            {grade.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="secondary"
+                      disabled={isLoading || !proctorCode}
+                      onClick={() =>
+                        void start("gradeReview", effectiveReviewGrade)
+                      }
+                    >
+                      Start review
+                    </button>
+                  </div>
+                ) : (
+                  <p className="learning-card-note">
+                    There is no earlier grade to review in this subject.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="level-panel">
               <h3>Set subject level</h3>
               <div className="level-row">
@@ -934,6 +1039,7 @@ export function LearningApp(): JSX.Element {
   const [isListening, setIsListening] = useState(false);
   const [proctorCode, setProctorCode] = useState("");
   const [placementGrade, setPlacementGrade] = useState<LearningLevel>("K");
+  const [reviewGrade, setReviewGrade] = useState<ReviewGrade>("K");
   const [progress, setProgress] = useState<Progress>({
     attempts: [],
     mastery: [],
@@ -946,6 +1052,7 @@ export function LearningApp(): JSX.Element {
     location.pathname === "/learning/practice" ||
     location.pathname === "/learning/diagnostic" ||
     location.pathname === "/learning/placement" ||
+    location.pathname === "/learning/grade-review" ||
     location.pathname === "/learning/proctored" ||
     location.pathname === "/learning/adult-scored";
   const activeLessonId =
@@ -980,7 +1087,9 @@ export function LearningApp(): JSX.Element {
   const practiceProgress = groupAttempts(
     progress.attempts.filter(
       (attempt) =>
-        attempt.purpose !== "diagnostic" && attempt.purpose !== "placement",
+        attempt.purpose !== "diagnostic" &&
+        attempt.purpose !== "placement" &&
+        attempt.purpose !== "gradeReview",
     ),
   );
   const canSubmit = sorting
@@ -1071,8 +1180,10 @@ export function LearningApp(): JSX.Element {
       | "practice"
       | "diagnostic"
       | "placement"
+      | "gradeReview"
       | "proctored"
       | "adultScored",
+    gradeOverride?: ReviewGrade,
   ) => {
     try {
       setIsLoadingSession(true);
@@ -1080,21 +1191,18 @@ export function LearningApp(): JSX.Element {
         purpose,
         purpose === "proctored" ||
           purpose === "adultScored" ||
-          purpose === "placement"
+          purpose === "placement" ||
+          purpose === "gradeReview"
           ? proctorCode
           : undefined,
-        curriculumGrade,
+        gradeOverride ?? curriculumGrade,
         selectedSubject,
       );
       setSession(next);
       setResumableAssessment(null);
       resetQuestionState();
       setError(null);
-      navigate(
-        purpose === "adultScored"
-          ? "/learning/adult-scored"
-          : `/learning/${purpose}`,
-      );
+      navigate(learningPath(purpose));
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Unable to start learning.",
@@ -1190,7 +1298,7 @@ export function LearningApp(): JSX.Element {
     setSelectedSubject(resumableAssessment.subject ?? selectedSubject);
     resetQuestionState();
     setError(null);
-    navigate(`/learning/${resumableAssessment.mode}`);
+    navigate(learningPath(resumableAssessment.mode));
   };
   const takeBreak = async () => {
     if (!session) return;
@@ -1400,6 +1508,8 @@ export function LearningApp(): JSX.Element {
             setProctorCode={setProctorCode}
             placementGrade={placementGrade}
             setPlacementGrade={setPlacementGrade}
+            reviewGrade={reviewGrade}
+            setReviewGrade={setReviewGrade}
             resumableAssessment={resumableAssessment}
             resumeAssessment={resumeAssessmentSession}
             start={start}
@@ -1505,9 +1615,11 @@ export function LearningApp(): JSX.Element {
                                 ? "INFORMATION LITERACY INQUIRY"
                                 : "ADULT-SCORED ELA CHECK"
                 : session.assessmentStage
-                  ? location.pathname === "/learning/diagnostic"
-                    ? `${placementGradeName(session.assessmentStage.grade).toUpperCase()} LEARNING CHECK · ${completedDiagnosticQuestions} / ${session.length} COMPLETED`
-                    : `${placementGradeName(session.assessmentStage.grade).toUpperCase()} LEARNING CHECK · ACTIVITY ${session.position + 1}`
+                  ? location.pathname === "/learning/grade-review"
+                    ? `${placementGradeName(session.assessmentStage.grade).toUpperCase()} REVIEW · ${completedDiagnosticQuestions} / ${session.length} COMPLETED`
+                    : location.pathname === "/learning/diagnostic"
+                      ? `${placementGradeName(session.assessmentStage.grade).toUpperCase()} LEARNING CHECK · ${completedDiagnosticQuestions} / ${session.length} COMPLETED`
+                      : `${placementGradeName(session.assessmentStage.grade).toUpperCase()} LEARNING CHECK · ACTIVITY ${session.position + 1}`
                   : `QUESTION ${session.position + 1} OF ${session.length}`}
             </p>
             {session.assessmentStage && !result && (
@@ -1767,7 +1879,9 @@ export function LearningApp(): JSX.Element {
                     title={
                       location.pathname === "/learning/placement"
                         ? "Placement complete"
-                        : "Diagnostic complete"
+                        : location.pathname === "/learning/grade-review"
+                          ? "Review complete"
+                          : "Diagnostic complete"
                     }
                   />
                 )}
@@ -1826,6 +1940,12 @@ export function LearningApp(): JSX.Element {
               <PlacementSummary
                 placement={progress.latestDiagnosticPlacement}
                 title="Latest diagnostic"
+              />
+            )}
+            {progress.latestGradeReview && (
+              <PlacementSummary
+                placement={progress.latestGradeReview}
+                title="Latest grade review"
               />
             )}
             {latestDiagnosticProgress.length > 0 && (

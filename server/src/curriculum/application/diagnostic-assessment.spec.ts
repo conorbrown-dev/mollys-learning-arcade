@@ -18,12 +18,12 @@ const template = (grade: "K" | "1" | "2", domain: string): QuestionTemplate => (
   provenance: { origin: "original", license: "Project" }, review: { status: "reviewed", reviewer: "test", reviewedAt: "2026-01-01T00:00:00.000Z" }
 });
 const templates = (["K", "1", "2"] as const).flatMap((grade) => domains.map((domain) => template(grade, domain)));
-const blueprint = () => createDiagnosticBlueprint(templates, "ELA", "Reading & Language", 7, { minimumEvidence: 2, maximumEvidence: 4, masteryThreshold: 0.75, requiredStandardsPerDomain: 1, domainMasteryThreshold: 1, gradeMasteryThreshold: 0.75, maximumItemsPerGrade: 20 });
+const blueprint = () => createDiagnosticBlueprint(templates, "ELA", "Reading & Language", 7, { minimumEvidence: 2, maximumEvidence: 4, masteryThreshold: 0.75, requiredStandardsPerDomain: 1, domainMasteryThreshold: 1, criticalDomainMasteryThreshold: 1, gradeMasteryThreshold: 0.75, maximumItemsPerGrade: 20 });
 
 type LearnerProfile = (grade: string, domain: string, attempt: number) => boolean;
 
-function simulate(profile: LearnerProfile): { state: DiagnosticState; report: ReturnType<typeof buildDiagnosticReport> } {
-  let state = startDiagnostic(blueprint());
+function simulate(profile: LearnerProfile, startGrade = "K"): { state: DiagnosticState; report: ReturnType<typeof buildDiagnosticReport> } {
+  let state = startDiagnostic(blueprint(), startGrade);
   let item = 0;
   while (!state.isComplete && item < 100) {
     const skill = selectNextDiagnosticSkill(state);
@@ -91,6 +91,31 @@ describe("diagnostic assessment", () => {
     const state = recordDiagnosticProbe(recordDiagnosticProbe(initial, probe), probe);
     expect(state.probes).toHaveLength(1);
     expect(evaluateCurrentGrade(state).isMastered).toBe(false);
+  });
+});
+
+describe("diagnostic starting at the enrolled grade", () => {
+  it("starts at the enrolled grade and keeps it when Grade 1 is not mastered but Kindergarten is", () => {
+    const { state, report } = simulate((grade) => grade === "K", "1");
+    expect(state.gradeResults.map((result) => result.grade)).toEqual(["1", "K"]);
+    expect(report.instructionalGrade).toBe("1");
+  });
+
+  it("drops to Kindergarten only when Kindergarten is also not mastered", () => {
+    expect(simulate(() => false, "1").report.instructionalGrade).toBe("K");
+  });
+
+  it("climbs from the enrolled grade without testing lower grades", () => {
+    const { state, report } = simulate(() => true, "1");
+    expect(state.gradeResults.map((result) => result.grade)).toEqual(["1", "2"]);
+    expect(report.instructionalGrade).toBe("2");
+  });
+
+  it("does not let one missed critical standard sink placement under the default policy", () => {
+    const grades = createDiagnosticBlueprint(templates, "ELA", "Reading & Language", 7);
+    let state = startDiagnostic(grades, "1");
+    expect(state.gradeIndex).toBe(1);
+    expect(grades.grades[1].domains.find((domain) => domain.domain === "RF")!.masteryThreshold).toBe(0.5);
   });
 });
 

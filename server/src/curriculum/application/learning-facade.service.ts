@@ -122,7 +122,7 @@ export class LearningFacadeService {
     const mastery = await this.repository.listMastery(learnerId);
     const activeTemplates = isAdaptiveAssessment(purpose) ? availableTemplates : purpose === "practice" ? selectNextLearningTemplates(templates, mastery) : purpose === "adultScored" ? selectNextLearningTemplates(templates, mastery, 1) : templates;
     if (!activeTemplates.length) throw new Error("All skills are mastered for now. Return when a scheduled review is due.");
-    const diagnostic = isAdaptiveAssessment(purpose) ? startDiagnostic(createDiagnosticBlueprint(activeTemplates, subject as "ELA" | "MATH", subjectName(subject), seed)) : undefined;
+    const diagnostic = isAdaptiveAssessment(purpose) ? startDiagnostic(createDiagnosticBlueprint(activeTemplates, subject as "ELA" | "MATH", subjectName(subject), seed), grade) : undefined;
     const selected = diagnostic ? this.requireDiagnosticTemplate(diagnostic, activeTemplates) : activeTemplates[seedAt(seed, 0) % activeTemplates.length];
     const sessionPurpose: SessionPurpose = purpose === "practice" && mastery.some((record) => record.standardId === selected.primaryStandardId && record.state === "reviewDue") ? "review" : purpose;
     const sessionTemplates = purpose === "proctored" ? templates.filter((template) => template.primaryStandardId === selected.primaryStandardId) : activeTemplates;
@@ -130,7 +130,7 @@ export class LearningFacadeService {
     const instance = generateQuestion(selected, seedAt(seed, 0));
     const session: StoredSession = {
       id: randomUUID(), learnerId, purpose: sessionPurpose, grade: selected.grade, diagnosticGrouping: subjectName(subject), seed, position: 0,
-      length: diagnostic ? diagnostic.blueprint.grades[0].maximumItems : purpose === "adultScored" ? 1 : purpose === "proctored" ? 5 : 10,
+      length: diagnostic ? diagnostic.blueprint.grades[diagnostic.gradeIndex].maximumItems : purpose === "adultScored" ? 1 : purpose === "proctored" ? 5 : 10,
       templates: sessionTemplates, instance, submittedInstanceIds: new Set<string>(), diagnosticQuestionFingerprints: new Set(diagnostic ? [diagnosticQuestionFingerprint(instance)] : []), proctoredCorrect: 0,
       diagnostic, createdAt: now, status: "active"
     };

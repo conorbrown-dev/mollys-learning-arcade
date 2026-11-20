@@ -56,13 +56,19 @@ describe("LearningFacadeService", () => {
 
   it("starts a coverage-based diagnostic at Kindergarten", async () => {
     const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
-    const started = await service.start("grade-two", "diagnostic", 42, undefined, "2", "MATH");
+    const started = await service.start("grade-two", "diagnostic", 42, undefined, "K", "MATH");
     expect(started).toMatchObject({ length: 30, assessmentStage: { grade: "K", number: 1, total: 3 } });
     const sessions = (service as unknown as { sessions: Map<string, { instance: { canonicalAnswer: unknown }; diagnostic: { probes: Array<{ grade: string }> } }> }).sessions;
     const stored = sessions.get(started.sessionId)!;
     await service.submit(started.sessionId, stored.instance.canonicalAnswer);
     expect(stored.diagnostic.probes[0].grade).toBe("K");
     expect(repository.sessions).toHaveLength(1);
+  });
+
+  it("starts the diagnostic at the learner's enrolled grade", async () => {
+    const service = new LearningFacadeService(new InMemoryProgressRepository(), "adult-code");
+    const started = await service.start("grade-one", "diagnostic", 42, undefined, "1", "MATH");
+    expect(started).toMatchObject({ assessmentStage: { grade: "1", number: 2, total: 3 } });
   });
 
   it("advances a consistently strong learner through K–2 and persists a detailed placement", async () => {
@@ -86,7 +92,7 @@ describe("LearningFacadeService", () => {
 
   it("stops after covered foundational misses and returns remediation targets", async () => {
     const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
-    const started = await service.start("needs-foundations", "diagnostic", 42, undefined, "2", "ELA");
+    const started = await service.start("needs-foundations", "diagnostic", 42, undefined, "K", "ELA");
     let result: Awaited<ReturnType<typeof service.submit>> | undefined;
     for (let index = 0; index < 30 && !result?.complete; index += 1) {
       result = await service.submit(started.sessionId, "definitely incorrect");
@@ -114,7 +120,7 @@ describe("LearningFacadeService", () => {
 
   it("never shows equivalent diagnostic questions twice", async () => {
     const repository = new InMemoryProgressRepository(); const service = new LearningFacadeService(repository, "adult-code");
-    const started = await service.start("unique-question-learner", "diagnostic", 42, undefined, "2", "ELA");
+    const started = await service.start("unique-question-learner", "diagnostic", 42, undefined, "K", "ELA");
     const sessions = (service as unknown as { sessions: Map<string, { instance: Parameters<typeof diagnosticQuestionFingerprint>[0] }> }).sessions;
     const fingerprints = new Set<string>();
 

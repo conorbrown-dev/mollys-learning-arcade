@@ -10,6 +10,7 @@ export interface DiagnosticPolicy {
   masteryThreshold: number;
   requiredStandardsPerDomain: number;
   domainMasteryThreshold: number;
+  criticalDomainMasteryThreshold: number;
   gradeMasteryThreshold: number;
   maximumItemsPerGrade: number;
 }
@@ -20,6 +21,8 @@ export const defaultDiagnosticPolicy: DiagnosticPolicy = {
   masteryThreshold: 0.75,
   requiredStandardsPerDomain: 2,
   domainMasteryThreshold: 0.5,
+  // A critical domain is a gate, but one unlucky standard must not sink a placement.
+  criticalDomainMasteryThreshold: 0.5,
   gradeMasteryThreshold: 0.75,
   maximumItemsPerGrade: 30
 };
@@ -171,7 +174,7 @@ export function createDiagnosticBlueprint(
         label: domainLabels[domain] ?? domain,
         isCritical,
         weight: 1,
-        masteryThreshold: isCritical ? 1 : policy.domainMasteryThreshold,
+        masteryThreshold: isCritical ? policy.criticalDomainMasteryThreshold : policy.domainMasteryThreshold,
         skills: selectedIds.map((standardId) => ({
           standardId,
           domain,
@@ -189,8 +192,9 @@ export function createDiagnosticBlueprint(
   return { subject, grouping, grades };
 }
 
-export function startDiagnostic(blueprint: DiagnosticBlueprint): DiagnosticState {
-  return { blueprint, gradeIndex: 0, probes: [], gradeResults: [], isComplete: false };
+export function startDiagnostic(blueprint: DiagnosticBlueprint, startGrade = gradeOrder[0]): DiagnosticState {
+  const startIndex = blueprint.grades.findIndex((grade) => grade.grade === startGrade);
+  return { blueprint, gradeIndex: Math.max(0, startIndex), probes: [], gradeResults: [], isComplete: false };
 }
 
 export function evidenceForSkill(state: DiagnosticState, skill: DiagnosticSkillRequirement, grade: string): DiagnosticSkillEvidence {
@@ -291,18 +295,21 @@ export function advanceDiagnostic(state: DiagnosticState): DiagnosticState {
   if (selectNextDiagnosticSkill(state)) return state;
   const result = evaluateCurrentGrade(state);
   const gradeResults = [...state.gradeResults.filter((item) => item.grade !== result.grade), result];
-  const hasNextGrade = result.isMastered && state.gradeIndex + 1 < state.blueprint.grades.length;
-  return hasNextGrade ? { ...state, gradeIndex: state.gradeIndex + 1, gradeResults } : { ...state, gradeResults, isComplete: true };
+  const isEvaluated = (index: number) => gradeResults.some((item) => item.grade === state.blueprint.grades[index]?.grade);
+  const nextIndex = result.isMastered ? state.gradeIndex + 1 : state.gradeIndex - 1;
+  const canMove = nextIndex >= 0 && nextIndex < state.blueprint.grades.length && !isEvaluated(nextIndex);
+  return canMove ? { ...state, gradeIndex: nextIndex, gradeResults } : { ...state, gradeResults, isComplete: true };
 }
 
 export function buildDiagnosticReport(state: DiagnosticState): DiagnosticReport {
   if (!state.isComplete) throw new Error("A diagnostic report requires a completed assessment.");
-  const evidence = state.gradeResults.flatMap((grade) => grade.domains.flatMap((domain) => domain.evidence));
-  const terminal = state.gradeResults.at(-1)!;
-  const instructionalGrade = terminal.grade;
-  const domainNames = [...new Set(state.gradeResults.flatMap((grade) => grade.domains.map((domain) => domain.domain)))];
+  const gradeResults = [...state.gradeResults].sort((a, b) => gradeOrder.indexOf(a.grade) - gradeOrder.indexOf(b.grade));
+  const evidence = gradeResults.flatMap((grade) => grade.domains.flatMap((domain) => domain.evidence));
+  // Instruction starts at the lowest grade not yet mastered, or the top grade if all evaluated grades were mastered.
+  const instructionalGrade = (gradeResults.find((grade) => !grade.isMastered) ?? gradeResults.at(-1)!).grade;
+  const domainNames = [...new Set(gradeResults.flatMap((grade) => grade.domains.map((domain) => domain.domain)))];
   const strandPlacements = domainNames.map((domain) => {
-    const results = state.gradeResults.flatMap((grade) => grade.domains.filter((item) => item.domain === domain));
+    const results = gradeResults.flatMap((grade) => grade.domains.filter((item) => item.domain === domain));
     const terminalDomain = results.find((result) => !result.isMastered) ?? results.at(-1)!;
     const hasUnresolved = terminalDomain.evidence.some((item) => item.status === "UNASSESSED" || item.status === "INSUFFICIENT_EVIDENCE");
     return {
@@ -313,19 +320,19 @@ export function buildDiagnosticReport(state: DiagnosticState): DiagnosticReport 
     };
   });
   const unique = (values: string[]) => [...new Set(values)];
-  const confidence: PlacementConfidence = state.gradeResults.some((grade) => grade.confidence === "LOW") ? "LOW" : state.gradeResults.some((grade) => grade.confidence === "MODERATE") ? "MODERATE" : "HIGH";
+  const confidence: PlacementConfidence = gradeResults.some((grade) => grade.confidence === "LOW") ? "LOW" : gradeResults.some((grade) => grade.confidence === "MODERATE") ? "MODERATE" : "HIGH";
   return {
     subject: state.blueprint.subject,
     grouping: state.blueprint.grouping,
     instructionalGrade,
     placementConfidence: confidence,
-    evidenceCoverage: state.gradeResults.reduce((sum, grade) => sum + grade.coverage, 0) / state.gradeResults.length,
+    evidenceCoverage: gradeResults.reduce((sum, grade) => sum + grade.coverage, 0) / gradeResults.length,
     totalItems: state.probes.length,
     demonstratedStrengths: unique(evidence.filter((item) => isMastery(item.status)).map((item) => item.standardId)),
     needsReinforcement: unique(evidence.filter((item) => item.status === "EMERGING" || item.status === "DEVELOPING").map((item) => item.standardId)),
-    criticalPrerequisiteGaps: unique(state.gradeResults.flatMap((grade) => grade.criticalGapIds)),
-    unresolvedSkills: unique(state.gradeResults.flatMap((grade) => grade.unresolvedSkillIds)),
+    criticalPrerequisiteGaps: unique(gradeResults.flatMap((grade) => grade.criticalGapIds)),
+    unresolvedSkills: unique(gradeResults.flatMap((grade) => grade.unresolvedSkillIds)),
     strandPlacements,
-    gradeResults: state.gradeResults
+    gradeResults
   };
 }
